@@ -1,20 +1,44 @@
-# Introduction 
-TODO: Give a short introduction of your project. Let this section explain the objectives or the motivation behind this project. 
+# EASI Cookbook  <img align="right" src="resources/csiro_easi_logo.png">
 
-# Getting Started
-TODO: Guide users through getting your code up and running on their own system. In this section you can talk about:
-1.	Installation process
-2.	Software dependencies
-3.	Latest releases
-4.	API references
+A collection of notebooks and recipes that demonstrate larger data processing workflows in EASI.
 
-# Build and Test
-TODO: Describe and show how to build your code and run the tests. 
+Use the code in this repository as examples and guides to be adapted to your workflows.
 
-# Contribute
-TODO: Explain how other users and developers can contribute to make your code better. 
+## Overview
 
-If you want to learn more about creating good readme files then refer the following [guidelines](https://docs.microsoft.com/en-us/azure/devops/repos/git/create-a-readme?view=azure-devops). You can also seek inspiration from the below readme files:
-- [ASP.NET Core](https://github.com/aspnet/Home)
-- [Visual Studio Code](https://github.com/Microsoft/vscode)
-- [Chakra Core](https://github.com/Microsoft/ChakraCore)
+We regularly see that users can struggle to efficiently go from a development notebook (that works on a small area) to scaling up their workflow to work on a larger set of data or operationally. The main challenges we see are in:
+
+- Efficient use of dask parameters tuned to the workflow
+- Resilient and cost-effective workflows
+
+## Common patterns for your package and code
+
+Common patterns that occur for each data processing workflow:
+
+1. Get work
+   - Space, time, product and processing parameters
+   - Select batching and tiling options
+   - Output is a list of work to do (number of batches)
+1. Do work
+   - Launch processes with each to do a batch
+   - Select optional dask configuration
+
+## Common patterns for large workflows
+
+There are three main patterns that can be explored. The best solution will likely depend on your workflow and requirements.
+
+### Jupyter Lab
+
+Launch one dask cluster per process.
+
+### Grid workflow
+
+Job tiling with ODC code
+
+### Argo
+
+Group work into batches each of which is run by a single Argo worker.
+
+- Can control the number of simultaneous Argo workers
+- If an Argo worker dies then the batch will be restarted. In this case ensure yor code can skip work that was previously done.
+- Each Argo worker can itself launch a dask cluster and a grid workflow, or any complex processing task.
