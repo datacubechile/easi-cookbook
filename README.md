@@ -42,3 +42,29 @@ Group work into batches each of which is run by a single Argo worker.
 - Can control the number of simultaneous Argo workers
 - If an Argo worker dies then the batch will be restarted. In this case ensure yor code can skip work that was previously done.
 - Each Argo worker can itself launch a dask cluster and a grid workflow, or any complex processing task.
+
+## Contributing
+
+Contributions are welcome.
+
+A `pre-commit` hook is provided in `/bin`. For each notebook committed this will:
+
+1. Attempy to strip any AWS secrets.
+1. Render an HTML copy of the notebook (with *outputs*) into `html/`.
+1. Strip *outputs* from the notebook to reduce the size of the repository.
+
+The `apply_hooks.sh` script creates a symlink to `bin/pre-commit`.
+
+```bash
+# Run this in your local repository
+sh bin/apply_hooks.sh
+```
+
+For contributors:
+
+1. Apply the pre-commit hook.
+1. Run each notebook (that has been updated) to populate the figures, tables and other *outputs* as you want them.
+1. Add a link into `html/readme.md` for each new notebook.
+1. Add an item to `whats_new.md`.
+1. `git add` and `git commit`.
+1. If everything looks ok, `git push` to your fork of this repository and create a *pull request*.
