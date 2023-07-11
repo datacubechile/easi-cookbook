@@ -15277,6 +15277,9 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">s3fs</span>
 <span class="kn">import</span> <span class="nn">asyncio</span>
 
+<span class="kn">import</span> <span class="nn">aiobotocore</span>
+<span class="kn">from</span> <span class="nn">botocore.exceptions</span> <span class="kn">import</span> <span class="n">ClientError</span>
+
 <span class="kn">import</span> <span class="nn">sys</span><span class="o">,</span> <span class="nn">re</span>
 <span class="kn">from</span> <span class="nn">pathlib</span> <span class="kn">import</span> <span class="n">Path</span>
 <span class="kn">from</span> <span class="nn">IPython.display</span> <span class="kn">import</span> <span class="n">Markdown</span>
@@ -15304,12 +15307,6 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <span class="n">dataset</span> <span class="o">=</span> <span class="s1">&#39;Copernicus_DSM_COG_10_S10_00_E141_00_DEM&#39;</span>
 <span class="n">datafile</span> <span class="o">=</span> <span class="s1">&#39;odc-metadata.yaml&#39;</span>
 <span class="n">notafile</span> <span class="o">=</span> <span class="s1">&#39;doesnotexist.yaml&#39;</span>
-
-<span class="n">auth</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="s1">&#39;AWS_ACCESS_KEY_ID&#39;</span><span class="p">:</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
-    <span class="s1">&#39;AWS_SECRET_ACCESS_KEY&#39;</span><span class="p">:</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
-    <span class="s1">&#39;AWS_SESSION_TOKEN&#39;</span><span class="p">:</span><span class="s2">&quot;&quot;</span>
-<span class="p">}</span>
 
 <span class="c1"># Confirm that the S3 dataset exists</span>
 <span class="n">x</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;s3://</span><span class="si">{</span><span class="n">bucket</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">dataset</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">datafile</span><span class="si">}</span><span class="s1">&#39;</span>
@@ -15349,7 +15346,25 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput " data-mime-type="text/markdown">
-<h1 id="Set-up">Set up<a class="anchor-link" href="#Set-up">&#182;</a></h1>
+<h1 id="Set-up">Set up<a class="anchor-link" href="#Set-up">&#182;</a></h1><p>There are two options for authorization</p>
+<ol>
+<li>Create an <a href="https://github.com/aio-libs/aiobotocore/blob/master/aiobotocore/session.py">aiobotocore session</a> &gt; <strong>Preferred if writing to S3</strong><ul>
+<li>Provide an auth dict</li>
+<li>Read profiles from <code>~/.aws/config</code></li>
+<li>Read <code>ENV</code> vars</li>
+</ul>
+</li>
+<li>Let <code>s3fs</code> create an <code>aiobotocore session</code> &gt; <strong>Good for default or read-only</strong><ul>
+<li>Parse selected keys, which doesn't include &quot;profile&quot;</li>
+<li>Create an <code>aiobotocore session</code> with basic auth keys</li>
+</ul>
+</li>
+</ol>
+<p>Each option in the next cells will work with this notebook, provided the default credentials are sufficient.</p>
+<blockquote>
+<p>Recommend you select and uncomment the version you are using, and comment-out the other two, so that its clear which credentials you're using.</p>
+</blockquote>
+
 </div>
 </div>
 </div>
@@ -15364,9 +15379,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># JupyterLab runs its own async loop, and python only has one so we use Jupyter&#39;s</span>
 <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
 
-<span class="c1"># Initialise session</span>
-<span class="c1"># TODO</span>
-<span class="c1"># - Add auth</span>
+<span class="c1"># Default session</span>
 <span class="n">s3</span> <span class="o">=</span> <span class="n">s3fs</span><span class="o">.</span><span class="n">S3FileSystem</span><span class="p">(</span><span class="n">asynchronous</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">loop</span><span class="o">=</span><span class="n">loop</span><span class="p">)</span>
 <span class="n">session</span> <span class="o">=</span> <span class="k">await</span> <span class="n">s3</span><span class="o">.</span><span class="n">set_session</span><span class="p">()</span>
 
@@ -15374,6 +15387,56 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 
 <span class="c1"># To close later</span>
 <span class="c1"># await session.close()</span>
+</pre></div>
+
+     </div>
+</div>
+</div>
+</div>
+
+</div><div id="cell-id=a4e2cf83-8f9e-4474-8fab-cfacb0c249eb" class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs  ">
+<div class="jp-Cell-inputWrapper">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[4]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+     <div class="CodeMirror cm-s-jupyter">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Simple auth in a dict</span>
+<span class="c1"># !! Do not save AWS credentials in your notebook. Please return values to empty strings before saving !!</span>
+<span class="c1"># auth = {</span>
+<span class="c1">#     &#39;aws_access_key_id&#39;: &quot;&quot;,</span>
+<span class="c1">#     &#39;aws_secret_access_key&#39;: &quot;&quot;,</span>
+<span class="c1">#     &#39;aws_session_token&#39;: &quot;&quot;</span>
+<span class="c1"># }</span>
+<span class="c1"># s3 = s3fs.S3FileSystem(asynchronous=True, loop=loop, client_kwargs=auth)</span>
+<span class="c1"># session = await s3.set_session()</span>
+</pre></div>
+
+     </div>
+</div>
+</div>
+</div>
+
+</div><div id="cell-id=3ef137a7-f92f-4acb-874f-0464543253f7" class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs  ">
+<div class="jp-Cell-inputWrapper">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[5]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+     <div class="CodeMirror cm-s-jupyter">
+<div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Custom auth</span>
+<span class="c1">#</span>
+<span class="c1"># Add the following to your ~/.aws/config file. Safer than adding them to the notebook</span>
+<span class="c1"># [profile temporary_power_user]</span>
+<span class="c1"># aws_access_key_id=
+<span class="c1"># aws_secret_access_key=
+<span class="c1"># aws_session_token=
+
+<span class="c1"># session = aiobotocore.session.AioSession(profile=&#39;temporary_power_user&#39;)</span>
+<span class="c1"># s3 = s3fs.S3FileSystem(asynchronous=True, loop=loop, session=session)</span>
+<span class="c1"># session = await s3.set_session()</span>
 </pre></div>
 
      </div>
@@ -15398,7 +15461,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[4]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[6]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="n">target</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">bucket</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">dataset</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">datafile</span><span class="si">}</span><span class="s1">&#39;</span>
@@ -15584,7 +15647,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[5]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[7]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="n">target</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">bucket</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">dataset</span><span class="si">}</span><span class="s1">&#39;</span>
@@ -15804,7 +15867,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[6]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[8]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># glob and filter with regex</span>
@@ -15866,7 +15929,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[7]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[9]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Large glob</span>
@@ -15941,7 +16004,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 
 
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
-<pre>Number of items: 838
+<pre>Number of items: 839
 </pre>
 </div>
 </div>
@@ -16001,7 +16064,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[8]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[10]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># get_mapper - not async</span>
@@ -16043,7 +16106,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 
 
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
-<pre>Number of items: 1676
+<pre>Number of items: 1677
 </pre>
 </div>
 </div>
@@ -16072,7 +16135,7 @@ body[data-format='mobile'] .jp-OutputArea-child .jp-OutputArea-output {
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[9]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[11]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="n">target</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">bucket</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">dataset</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">datafile</span><span class="si">}</span><span class="s1">&#39;</span>
@@ -16163,7 +16226,7 @@ lineage: {}
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[10]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[12]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># File open functions are not async</span>
@@ -16369,7 +16432,7 @@ lineage: {}
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[11]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[13]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># File to targets</span>
@@ -16421,8 +16484,12 @@ lineage: {}
 
 
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
-<pre>-rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 /home/jovyan/s3fs_test
-Tue Jul 11 04:38:51 UTC 2023
+<pre>total 12K
+drwxr-xr-x 2 jovyan users 6.0K Jul 11 04:38 Copernicus_DSM_COG_10_S10_00_E141_00_DEM
+drwxr-xr-x 3 jovyan users 6.0K Jul 11 04:38 aust
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
+Tue Jul 11 09:18:35 UTC 2023
+rm: cannot remove &#39;/home/jovyan/s3fs_test&#39;: Is a directory
 </pre>
 </div>
 </div>
@@ -16445,9 +16512,11 @@ Tue Jul 11 04:38:51 UTC 2023
 
 
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
-<pre>total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
-Tue Jul 11 04:38:51 UTC 2023
+<pre>total 12K
+drwxr-xr-x 2 jovyan users 6.0K Jul 11 04:38 Copernicus_DSM_COG_10_S10_00_E141_00_DEM
+drwxr-xr-x 3 jovyan users 6.0K Jul 11 04:38 aust
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
+Tue Jul 11 09:18:35 UTC 2023
 </pre>
 </div>
 </div>
@@ -16461,7 +16530,7 @@ Tue Jul 11 04:38:51 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[12]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[14]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Directory to targets</span>
@@ -16516,9 +16585,9 @@ Tue Jul 11 04:38:51 UTC 2023
 
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
 <pre>total 9.5M
--rw-r--r-- 1 jovyan users 9.5M Jul 11 04:38 Copernicus_DSM_COG_10_S10_00_E141_00_DEM.tif
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
-Tue Jul 11 04:38:52 UTC 2023
+-rw-r--r-- 1 jovyan users 9.5M Jul 11 09:18 Copernicus_DSM_COG_10_S10_00_E141_00_DEM.tif
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
+Tue Jul 11 09:18:36 UTC 2023
 </pre>
 </div>
 </div>
@@ -16542,9 +16611,9 @@ Tue Jul 11 04:38:52 UTC 2023
 
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
 <pre>total 9.5M
--rw-r--r-- 1 jovyan users 9.5M Jul 11 04:38 Copernicus_DSM_COG_10_S10_00_E141_00_DEM.tif
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
-Tue Jul 11 04:38:52 UTC 2023
+-rw-r--r-- 1 jovyan users 9.5M Jul 11 09:18 Copernicus_DSM_COG_10_S10_00_E141_00_DEM.tif
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
+Tue Jul 11 09:18:36 UTC 2023
 </pre>
 </div>
 </div>
@@ -16568,9 +16637,9 @@ Tue Jul 11 04:38:52 UTC 2023
 
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
 <pre>total 9.5M
--rw-r--r-- 1 jovyan users 9.5M Jul 11 04:38 Copernicus_DSM_COG_10_S10_00_E141_00_DEM.tif
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
-Tue Jul 11 04:38:53 UTC 2023
+-rw-r--r-- 1 jovyan users 9.5M Jul 11 09:18 Copernicus_DSM_COG_10_S10_00_E141_00_DEM.tif
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
+Tue Jul 11 09:18:37 UTC 2023
 </pre>
 </div>
 </div>
@@ -16584,7 +16653,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[13]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[15]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Files + Dirs to targets</span>
@@ -16637,40 +16706,40 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
 <pre>/home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S10_00_E141_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
 
 /home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S10_00_E142_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
 
 /home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S10_00_E143_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
 
 /home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S11_00_E141_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
 
 /home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S11_00_E142_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
 
 /home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S11_00_E143_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
 
 /home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S12_00_E141_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
 
 /home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S12_00_E142_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
 
 /home/jovyan/s3fs_test/aust/copernicus_dem_30/Copernicus_DSM_COG_10_S12_00_E143_00_DEM:
 total 4.0K
--rw-r--r-- 1 jovyan users 1.1K Jul 11 04:38 odc-metadata.yaml
-Tue Jul 11 04:38:53 UTC 2023
+-rw-r--r-- 1 jovyan users 1.1K Jul 11 09:18 odc-metadata.yaml
+Tue Jul 11 09:18:37 UTC 2023
 </pre>
 </div>
 </div>
@@ -16696,7 +16765,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[14]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[16]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="kn">import</span> <span class="nn">boto3</span>
@@ -16706,12 +16775,24 @@ Tue Jul 11 04:38:53 UTC 2023
 <span class="n">target</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">scratch</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">userid</span><span class="si">}</span><span class="s1">/s3fs_test&#39;</span>
 <span class="n">workdir</span> <span class="o">=</span> <span class="s1">&#39;/home/jovyan/s3fs_test&#39;</span>
 
-<span class="n">_</span> <span class="o">=</span> <span class="k">await</span> <span class="n">s3</span><span class="o">.</span><span class="n">_put</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">workdir</span><span class="si">}</span><span class="s1">/aust/&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">target</span><span class="si">}</span><span class="s1">/&#39;</span><span class="p">,</span> <span class="n">recursive</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="c1"># Catch Access Denied</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">_</span> <span class="o">=</span> <span class="k">await</span> <span class="n">s3</span><span class="o">.</span><span class="n">_put</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">workdir</span><span class="si">}</span><span class="s1">/aust/&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">target</span><span class="si">}</span><span class="s1">/&#39;</span><span class="p">,</span> <span class="n">recursive</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="k">except</span> <span class="p">(</span><span class="n">ClientError</span><span class="p">,</span> <span class="ne">PermissionError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+    <span class="c1"># Exit cell without traceback, https://stackoverflow.com/a/56953105</span>
+    <span class="k">class</span> <span class="nc">StopExecution</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+        <span class="k">def</span> <span class="nf">_render_traceback_</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="k">raise</span> <span class="n">StopExecution</span>
+    
 
 <span class="n">display</span><span class="p">(</span><span class="n">Markdown</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;**glob** .../&#39;</span><span class="p">))</span>
 <span class="n">r</span> <span class="o">=</span> <span class="k">await</span> <span class="n">s3</span><span class="o">.</span><span class="n">_glob</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">target</span><span class="si">}</span><span class="s1">/&#39;</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
 
+<span class="c1"># Optional: More detail</span>
 <span class="n">display</span><span class="p">(</span><span class="n">Markdown</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;**glob** .../copernicus_dem_30/&#39;</span><span class="p">))</span>
 <span class="n">r</span> <span class="o">=</span> <span class="k">await</span> <span class="n">s3</span><span class="o">.</span><span class="n">_glob</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">target</span><span class="si">}</span><span class="s1">/copernicus_dem_30/&#39;</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
@@ -16855,7 +16936,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[15]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[17]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Close session</span>
@@ -16888,7 +16969,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[16]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[18]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="n">names_set</span> <span class="o">=</span> <span class="p">{</span>
@@ -16921,7 +17002,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[17]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[19]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="n">start</span> <span class="o">=</span> <span class="n">dt</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
@@ -17041,7 +17122,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
 <pre>[&#39;easi-dc-data/products-index/copernicus_dem_30/Copernicus_DSM_COG_10_S10_00_E141_00_DEM/odc-metadata.yaml&#39;]
 []
-0.19 seconds
+0.18 seconds
 </pre>
 </div>
 </div>
@@ -17055,7 +17136,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[18]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[20]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="n">start</span> <span class="o">=</span> <span class="n">dt</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
@@ -17180,7 +17261,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain">
 <pre>[&#39;easi-dc-data/products-index/copernicus_dem_30/Copernicus_DSM_COG_10_S10_00_E141_00_DEM/odc-metadata.yaml&#39;]
 []
-0.11 seconds
+0.12 seconds
 </pre>
 </div>
 </div>
@@ -17227,7 +17308,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[19]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[21]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Synchronous</span>
@@ -17298,7 +17379,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[20]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[22]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Asynchronous</span>
@@ -17370,7 +17451,7 @@ Tue Jul 11 04:38:53 UTC 2023
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea">
-<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[21]:</div>
+<div class="jp-InputPrompt jp-InputArea-prompt">In&nbsp;[23]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
      <div class="CodeMirror cm-s-jupyter">
 <div class=" highlight hl-ipython3"><pre><span></span><span class="c1"># Close session</span>
