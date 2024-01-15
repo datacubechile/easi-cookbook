@@ -1,0 +1,17 @@
+version: '3.4'
+
+services:
+  postgres:
+    # db with some data from s2_l2a pre-indexed
+    build: docker/database/
+    environment:
+      - POSTGRES_DB=${DB_DATABASE}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_USER=${DB_USERNAME}
+    ports:
+      - "${DB_PORT}:5432"
+    restart: no
+  # Overwrite easi-workflows-dev so it can talk to docker db
+  easi-cookbook:
+    environment:
+      DB_PORT: 5432

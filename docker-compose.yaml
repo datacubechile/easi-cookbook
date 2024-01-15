@@ -1,0 +1,19 @@
+version: '3.4'
+
+# Default compose will create an ows image, with dev settings and connect to a local db
+services:
+  easi-cookbook:
+    build: docker/easi-cookbook
+    environment:
+      # Defaults are defined in .env file
+      DB_HOSTNAME: ${DB_HOSTNAME}
+      DB_PORT: ${DB_PORT}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE: ${DB_DATABASE}
+      AWS_PROFILE: ${AWS_PROFILE}
+      PYTHONPATH: ${PYTHONPATH}
+      JUPYTERHUB_API_TOKEN: 0000
+    volumes:
+      - ~/.aws:/home/vscode/.aws
+    restart: no
