@@ -2,10 +2,12 @@ import datetime
 import json
 import logging
 import sys
+import os
 
 import boto3
 import dateutil
 import geojson
+from pathlib import Path
 from botocore.exceptions import ClientError
 
 from .geometry import get_boundary, validate_geojson
@@ -35,6 +37,58 @@ def s3_upload_file(file_name, bucket, object_name=None):
         return False
     return True
 
+def s3_download_folder(prefix:str, bucket:str, path:str):
+    """Download a folder prefix from S3
+
+    :param prefix: The parent prefix for download
+    :param bucket: Bucket to download from
+    :param path: The local folder path to download to
+    :return: True if file was downloaded, else False
+    """
+    # TODO Deprecation candidate? Newer workflows use aioboto3
+
+    # boto3
+    if "s3" not in locals():
+        s3 = boto3.client("s3")
+    # Upload the file
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page['Contents']:
+                key = Path(obj['Key'])
+                tmp_dir =  Path(path) / '/'.join(str(key.relative_to(prefix)).split('/')[0:-1])
+                if not os.path.exists(tmp_dir):
+                    os.makedirs(tmp_dir)
+                else:
+                    s3.download_file(bucket, str(key), tmp_dir / key.name)
+    except (ClientError) as e:
+        logging.error(e)
+        return False
+    return True
+
+def s3_download_file(key:str, bucket:str, path:str):
+    """Upload a file to an S3 bucket
+
+    :param key: The S3 key to download
+    :param bucket: Bucket to download from
+    :param path: The local path to write to
+    :return: True if file was downloaded, else False
+    """
+    # TODO Deprecation candidate? Newer workflows use aioboto3
+
+    # boto3
+    if "s3" not in locals():
+        s3 = boto3.client("s3")
+    # Upload the file
+    try:
+        if not os.path.exists(path):
+            os.makedirs(path)
+        else:
+            s3.download_file(bucket, key, path + "/" + Path(key).name)
+    except (ClientError) as e:
+        logging.error(e)
+        return False
+    return True
 
 def process_order_params(order_params: dict, aws_region: str):
     """
@@ -223,3 +277,15 @@ def today_utc() -> datetime.datetime:
             datetime.date.today(),
             datetime.time()
         ).replace(tzinfo=datetime.timezone.utc)
+
+def calc_chunk(val, target):
+    if target >= val:
+        res = val # full chunk if less than target
+    elif (val//target == 1) and ((val-target)/target >= 0.5):
+        res = target # use target if leftover is at least 50%
+    else:
+        option1 = math.ceil(val/(val//target))
+        option2 = math.floor(val/(val//target))
+        
+        res = option1 if (val/option1)%1 >= (val/option2)%1 else option2 # calculate best option if needed
+    return res

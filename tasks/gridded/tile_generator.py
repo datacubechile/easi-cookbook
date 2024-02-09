@@ -71,10 +71,13 @@ class TileGenerator(ArgoTask):
                 self._logger.warning(f"Using default CRS {roi_crs} for aoi/boundary")
             self.odc_query["geopolygon"] = geometry.Geometry(boundary, crs=roi_crs)
 
+        origin = self.odc_query.pop('origin') if self.odc_query.get('origin') else [0,0]
+
         gs_params = {
             "crs": self.odc_query["output_crs"],
             "tile_size": (self.size, self.size),
             "resolution": self.odc_query["resolution"],
+            "origin": origin
         }
         self._logger.debug(f"Creating GridSpec with {gs_params}")
         gs = GridSpec(**gs_params)

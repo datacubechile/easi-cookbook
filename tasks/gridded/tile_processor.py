@@ -1,12 +1,21 @@
 """
 Example of geomedian calculation for a tile, using a local dask cluster.
 """
-
+import sys
 import logging
 import pickle
+import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import joblib
+import numpy as np
+import rioxarray
+import xarray as xr
 
+sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src/')
+sys.path.insert(1, '.')
+
+import datetime
 import pandas as pd
 from dask.distributed import Client, LocalCluster, wait
 from datacube.api import GridWorkflow
@@ -15,8 +24,20 @@ from eodatasets3 import DatasetPrepare
 from odc.algo import from_float, to_f32, xr_geomedian
 from tasks.argo_task import ArgoTask
 from tasks.gridded.tile_generator import TileGenerator
-from xarray import Dataset
+from xarray import Dataset, DataArray
 from datacube.utils.rio import configure_s3_access
+from datacube.utils.cog import write_cog
+from dea_tools.classification import predict_xr
+from rasterio.enums import Resampling
+
+from tasks.common import calc_chunk, s3_download_file
+
+import samsara.images as simages
+import samsara.pelt as spelt
+import samsara.filter as sfilter
+import samsara.stats.neighborhood as sns
+import samsara.kernel as skernel
+import samsara.stats.glcm as sglcm
 
 class TileProcessor(ArgoTask):
     PRODUCT = "landsat8_geomedian_monthly"
@@ -43,14 +64,22 @@ class TileProcessor(ArgoTask):
         convert the `key` from a list or lists to a list of tuples.
         """
         super().__init__(input_params)
+        self.id_ = 0
         self.measurements = [] if self.measurements == "" else self.measurements
+
+        self.compute_pelt = "True" if not self.pelt_params.get('compute_pelt') else self.pelt_params.get('compute_pelt')
+        self.compute_neighbors = "True" if not self.neighbor_params.get('compute_neighbors') else self.neighbor_params.get('compute_neighbors')
+        self.compute_textures = "True" if not self.texture_params.get('compute_textures') else self.texture_params.get('compute_textures')
+        self.compute_rf = "True" if not self.rf_params.get('compute_rf') else self.rf_params.get('compute_rf')
 
         # Convert key from list[list] to list[tuple]
         self.key = [tuple(k) for k in self.key]
 
         self._client = None
         self._cluster = None
-        self._nworkers = 4
+        self.nworkers = 4 if self.nworkers == "" else self.nworkers
+
+        self.temp_dir = TemporaryDirectory()
 
         # Unpickle the product cells from file
         with open(TileGenerator.FILEPATH_CELLS, "rb") as fh:
@@ -59,7 +88,7 @@ class TileProcessor(ArgoTask):
     def start_client(self) -> None:
         """Start a local dask cluster, if needed."""
         if self._client is None:
-            self._cluster = LocalCluster(n_workers=self._nworkers)
+            self._cluster = LocalCluster(n_workers=self.nworkers)
             self._client = Client(self._cluster)
             configure_s3_access(aws_unsigned=False, requester_pays=True, client=self._client)
 
@@ -74,11 +103,14 @@ class TileProcessor(ArgoTask):
     def load_from_grid(self, key: (int, int)) -> Dataset:
         """Load data from grid flow."""
         cell = self.product_cells.get(key)
+        
         # All geoboxes for the tiles are the same shape. Use this for the chunk size in
         # dask so each tile spatially is a single chunk. Note that the geobox resolution
         # is in (y, x) order
         chunk_dim = cell.geobox.shape
-        chunks = {"time": 10, "x": chunk_dim[1], "y": chunk_dim[0]}
+        chunks = {"time": 1, "x": chunk_dim[1], "y": chunk_dim[0]}
+        if self.tile_buffer:
+            cell.geobox = cell.geobox.buffered(*self.tile_buffer) if self.tile_buffer else cell.geobox
         try:
             ds = GridWorkflow.load(
                 cell,
@@ -99,13 +131,13 @@ class TileProcessor(ArgoTask):
         # Use datacube masking methods
         # https://docs.dea.ga.gov.au/notebooks/How_to_guides/Masking_data.html
         cloud_free_mask = make_mask(
-            ds.pixel_qa, water="land_or_cloud", clear="clear", nodata=False
+            ds.qa_pixel, water="land_or_cloud", clear="clear", nodata=False
         )
 
         # Set all nodata pixels to `NaN`:
         # float32 has sufficient precision for original uint16 SR_bands and saves memory
         cloud_free = mask_invalid_data(
-            ds[["red", "green", "blue"]].astype("float32", casting="same_kind")
+            ds[["red", "nir08"]].astype("float32", casting="same_kind")
         )  #  remove the invalid data on Surface reflectance bands prior to masking clouds
         cloud_free = cloud_free.where(cloud_free_mask)
 
@@ -119,64 +151,187 @@ class TileProcessor(ArgoTask):
         """
         return to_f32(ds, scale=self.SCALE, offset=-0.2)
 
-    def calculate_geomedian(self, ds: Dataset) -> Dataset:
-        """Calculate the geomedian and cast it to `int16`."""
-        geomedian = xr_geomedian(
-            ds,
-            # disable internal threading, dask will run several concurrently
-            num_threads=1,
-            # Epsilon: 1/5 pixel value resolution. Undocumented in hdstats
-            eps=0.2 * self.SCALE,
-            # Disable checks that use too much ram
-            nocheck=True,
-        )
-        geomedian = from_float(
-            geomedian,
-            dtype="int16",
-            nodata=-999,
-            scale=1 / self.SCALE,
-            offset=0,
-        )
-        return geomedian
+    def run_pelt(self, ds: Dataset) -> Dataset:
+        """Run PELT on the dataset."""
+        # rupture parameters
+        model = self.pelt_params['model']
+        min_size = int(self.pelt_params['min_size'])
+        jump = int(self.pelt_params['jump'])
+        penalty = int(self.pelt_params['penalty'])
 
-    def _save_cog(
-        self,
-        ds: Dataset,
-        prod_dir: Path,
-        key: (int, int),
-        start: pd.Timestamp,
-    ) -> None:
-        """Save dataset to local `prod_dir` as datacube indexable COGS."""
-        # Set timestamp as last day of month
-        ts = start + self.ONE_MONTH - self.ONE_DAY
-        metadata_path = prod_dir / "odc-metadata.yaml"
-        with DatasetPrepare(metadata_path=metadata_path) as p:
-            p.product_family = self.PRODUCT
-            p.label = prod_dir.name
-            p.datetime = ts.to_pydatetime()
-            p.processed_now()
-            for measurement in ds.keys():
-                path = prod_dir / f"{prod_dir.name}_{measurement}.tif"
-                self._logger.debug(f"    Saving COG to {path}")
-                ds[measurement].rio.to_raster(path)
-                p.note_measurement(
-                    measurement.lower(), path.name, relative_to_dataset_location=True
-                )
-            p.properties["odc:file_format"] = "GeoTIFF"
-            p.done(validate_correctness=False)
-            self._logger.debug(f"    Saving metadata to {metadata_path}")
+        # samsara parameters
+        n_breaks = int(self.pelt_params['n_breaks'])
+        start_date = self.pelt_params['start_date']
 
-    def _save_zarr(
-        self,
-        ds: Dataset,
-        prod_dir: Path,
-        key: (int, int),
-        start: pd.Timestamp,
-    ) -> None:
-        """Save dataset to local `prod_dir` as zarr."""
-        path = prod_dir / f"{prod_dir.name}.zarr"
-        self._logger.debug(f"    Saving {path}")
-        ds.to_zarr(store=path)
+        ds = ds.chunk({'x':int(self.pelt_params['processing_chunk_size']), 'y':int(self.pelt_params['processing_chunk_size']), 'time':-1})
+        
+        ndvi = simages.mask_and_calculate_ndvi(ds)
+        
+        fpelt = spelt.pelt(
+            array = ndvi,
+            n_breaks=n_breaks, 
+            penalty=penalty, 
+            start_date=start_date,
+            model=model,
+            min_size=min_size,
+            jump = jump,
+            backend = 'dask'
+        )
+        fpelt.date.data = spelt.datetime_to_year_fraction(fpelt.date.data.astype('datetime64[s]'))
+
+        return fpelt
+    
+    def run_neighbors(self, ds: Dataset) -> (Dataset, Dataset):
+        pelt_filtered = sfilter.filter_by_variable(ds, filter_type = 'last_negative', variable = 'magnitude').chunk({'x':200, 'y':200})
+
+        date_std = sns.stats(pelt_filtered, stat = "std", kernel = int(self.neighbor_params['neighbor_radius']), variable = 'date')
+        date_cnt = sns.stats(pelt_filtered, stat = "count", kernel = int(self.neighbor_params['neighbor_radius']), variable = 'date')
+
+        inputImg = pelt_filtered.magnitude.to_dataset(name = 'magnitude', promote_attrs = True)
+        inputImg[['ngbh_stdev']] = date_std
+        inputImg[['ngbh_count']] = date_cnt
+        inputImg.attrs = ds.attrs
+        for var in inputImg.variables:
+            inputImg[var].attrs['grid_mapping'] = ds.attrs['grid_mapping']
+        for var in pelt_filtered.variables:
+            pelt_filtered[var].attrs['grid_mapping'] = ds.attrs['grid_mapping']
+
+        inputImg = inputImg.compute()
+        pelt_filtered = pelt_filtered.compute()
+        
+        return inputImg, pelt_filtered
+
+    def run_textures(self, inputImg: Dataset, pelt_filtered: Dataset) -> (Dataset, DataArray):
+
+        target_chunk_size = 1024
+        x_chunk = calc_chunk(inputImg.magnitude.shape[1],target_chunk_size)
+        y_chunk = calc_chunk(inputImg.magnitude.shape[0],target_chunk_size)
+        inputImg = inputImg.chunk({'x': x_chunk, 'y': y_chunk})
+        glcm_radius = int(self.texture_params['glcm_radius'])
+        levels = 2**3.
+        distances = [1, 4, 7]
+        angles = [0*(math.pi/4), 1*(math.pi/4), 2*(math.pi/4), 3*(math.pi/4)]
+
+        r15_circle_kernel = skernel.circle(int(self.texture_params['smooth_radius']))
+        focal =  sns.stats(inputImg, stat = "mean", kernel = r15_circle_kernel, variable = 'magnitude')
+
+        pelt_filtered_magnitude_smooth = focal.where(abs(inputImg.magnitude - focal) > 0.2, other=inputImg.magnitude)
+
+        if (pelt_filtered_magnitude_smooth.isnull().any().data):
+            new_levels = int(levels + 1)
+        else:
+            new_levels = int(levels)
+
+        data3 = simages.xr_transform(pelt_filtered_magnitude_smooth, levels = levels, dtype = 'uint8')
+
+        darr = data3.chunk({'x':x_chunk,'y':y_chunk})
+        nmetrics = 7
+        chunks_ = tuple([(nmetrics,)] + list(darr.chunks))
+
+        mb_kwargs = {
+            'distances' : distances,
+            'angles' : angles,
+            'levels' : new_levels,
+            'symmetric' : True,
+            'normed' : True,
+            'skip_nan' : True,
+            'nan_supression' : 3,
+            'rescale_normed' : True,
+        }
+
+        glcm = sglcm.glcm_textures(darr, radius = glcm_radius, n_feats = 7, **mb_kwargs)
+    
+        glcm = glcm.compute()
+        
+        return inputImg, glcm
+    
+    def run_rf(self, inputImg: Dataset, pelt_filtered: Dataset) -> (Dataset, Dataset, Dataset):
+        rf_model = self.rf_params["rf_model"]
+
+        s3_download_file('products-index/samsara/'+rf_model,'easido-prod-dc-data',self.temp_dir.name)
+        nname = rf_model.split(".")[0]
+        classifier = joblib.load(self.temp_dir.name + '/' + rf_model)
+
+        inputImgf = inputImg.chunk({"x": 500, "y": 500})
+        classified = predict_xr(model = classifier, 
+                                input_xr = inputImgf, 
+                                clean=True).rename(name_dict = {"Predictions": "y_predict"})#.compute()
+        classified.attrs = inputImg.attrs
+        classified=classified.chunk({'x':500,'y':500})
+
+        # filtrar por landcover especial y alinear a classified
+        s3_download_file('products-index/samsara/LC_union_4y7_cog.tif','easido-prod-dc-data',self.temp_dir.name)
+        lc_ = xr.load_dataset(self.temp_dir.name+"/LC_union_4y7_cog.tif", engine="rasterio").band_data.squeeze()
+        lc = lc_.rio.reproject(inputImg.rio.crs,
+                            transform=inputImg.rio.transform(),
+                            shape=inputImg.rio.shape,
+                            resampling = Resampling.nearest)
+
+        ## Lugares con cambios
+        sam_bool = xr.where((inputImg.magnitude.notnull()) & (lc.astype(bool)), classified.y_predict, 255).astype(dtype = "uint8").rio.write_crs("epsg:32619", inplace=True).compute()
+
+        ## Magnitudes con cambios
+        sam_mgs = xr.where((classified.y_predict == 1) & (lc.astype(bool)), inputImg.magnitude, np.nan).astype(dtype = "float32").rio.write_crs("epsg:32619", inplace=True).compute()
+
+        ## Fechas con cambios
+        sam_dates = xr.where((classified.y_predict == 1) & (lc.astype(bool)) & (inputImg.magnitude.notnull()), pelt_filtered.date, np.nan).astype(dtype = "float32").rio.write_crs("epsg:32619", inplace=True).compute()
+
+        return sam_bool, sam_mgs, sam_dates
+
+    # def _save_cog(
+    #     self,
+    #     ds: Dataset,
+    #     prod_dir: Path,
+    #     key: (int, int),
+    #     start: pd.Timestamp,
+    # ) -> None:
+    #     """Save dataset to local `prod_dir` as datacube indexable COGS."""
+    #     # Set timestamp as last day of month
+    #     ts = start + self.ONE_MONTH - self.ONE_DAY
+    #     metadata_path = prod_dir / "odc-metadata.yaml"
+    #     with DatasetPrepare(metadata_path=metadata_path) as p:
+    #         p.product_family = self.PRODUCT
+    #         p.label = prod_dir.name
+    #         p.datetime = ts.to_pydatetime()
+    #         p.processed_now()
+    #         for measurement in ds.keys():
+    #             path = prod_dir / f"{prod_dir.name}_{measurement}.tif"
+    #             self._logger.debug(f"    Saving COG to {path}")
+    #             ds[measurement].rio.to_raster(path)
+    #             p.note_measurement(
+    #                 measurement.lower(), path.name, relative_to_dataset_location=True
+    #             )
+    #         p.properties["odc:file_format"] = "GeoTIFF"
+    #         p.done(validate_correctness=False)
+    #         self._logger.debug(f"    Saving metadata to {metadata_path}")
+
+    # def _save_zarr(
+    #     self,
+    #     ds: Dataset,
+    #     prod_dir: Path,
+    #     key: (int, int),
+    #     start: pd.Timestamp,
+    # ) -> None:
+    #     """Save dataset to local `prod_dir` as zarr."""
+    #     path = prod_dir / f"{prod_dir.name}.zarr"
+    #     self._logger.debug(f"    Saving {path}")
+    #     ds.to_zarr(store=path)
+
+    def download_folder(self, prod_dir: Path) -> None:
+        """Download S3 files to `prod_dir`.
+
+        Uses the bucket and prefix defined in `self.output`.
+        """
+        bucket = self.output["bucket"]
+        prefix = Path(self.output["prefix"])
+        
+        prefix = str(prefix / prod_dir.relative_to(Path(self.temp_dir.name+'/outputs')))
+        self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {prod_dir}")
+        self.s3_download_folder(
+            prefix=prefix,
+            bucket=bucket,
+            path=str(prod_dir)
+        )
 
     def upload_files(self, prod_dir: Path) -> None:
         """Upload local `prod_dir` and its contents to S3.
@@ -188,7 +343,7 @@ class TileProcessor(ArgoTask):
         for path in prod_dir.rglob("*"):
             if not path.is_file():
                 continue
-            key = str(prefix / path.relative_to(prod_dir.parent))
+            key = str(prefix / path.relative_to(self.temp_dir.name + "/outputs"))
             self._logger.debug(f"    Uploading {path} to s3://{bucket}/{key}")
             self.s3_upload_file(
                 path=str(path),
@@ -196,61 +351,218 @@ class TileProcessor(ArgoTask):
                 key=key,
             )
 
-    def save(
-        self,
-        ds: Dataset,
-        key: (int, int),
-        start: pd.Timestamp,
-        storage: str = "cog",
-    ) -> None:
-        """Save dataset to cog or zarr in S3.
+    # def save(
+    #     self,
+    #     ds: Dataset,
+    #     key: (int, int),
+    #     start: pd.Timestamp,
+    #     storage: str = "cog",
+    #     upload: bool = False
+    # ) -> None:
+    #     """Save dataset to cog or zarr in S3.
 
-        The `key` and `start` date are used to format the product name based on
-        `PRODUCT_TEMPLATE`. The files are saved to a local temporary directory before
-        being uploaded to S3 in the bucket and prefix specified in `self.output`.
-        """
-        prod_name = self.PRODUCT_TEMPLATE.format(
-            product=self.PRODUCT,
-            xref=f"{key[0]:+04}".replace("+", "E").replace("-", "W"),
-            yref=f"{key[1]:+04}".replace("+", "N").replace("-", "S"),
-            year=start.year,
-            month=start.month,
-        )
-        with TemporaryDirectory() as tmpdirname:
-            prod_dir = Path(tmpdirname) / prod_name
-            prod_dir.mkdir()
-            if storage.lower() == "cog":
-                self._save_cog(ds=ds, prod_dir=prod_dir, key=key, start=start)
-            elif storage.lower() == "zarr":
-                self._save_zarr(ds=ds, prod_dir=prod_dir, key=key, start=start)
-            else:
-                raise ValueError(f"Unknown storage: {storage}")
-            self.upload_files(prod_dir)
+    #     The `key` and `start` date are used to format the product name based on
+    #     `PRODUCT_TEMPLATE`. The files are saved to a local temporary directory before
+    #     being uploaded to S3 in the bucket and prefix specified in `self.output`.
+    #     """
+    #     prod_name = self.PRODUCT_TEMPLATE.format(
+    #         product=self.PRODUCT,
+    #         xref=f"{key[0]:+04}".replace("+", "E").replace("-", "W"),
+    #         yref=f"{key[1]:+04}".replace("+", "N").replace("-", "S"),
+    #         year=start.year,
+    #         month=start.month,
+    #     )
+    #     with TemporaryDirectory() as tmpdirname:
+    #         prod_dir = Path(tmpdirname) / prod_name
+    #         prod_dir.mkdir()
+    #         if storage.lower() == "cog":
+    #             self._save_cog(ds=ds, prod_dir=prod_dir, key=key, start=start)
+    #         elif storage.lower() == "zarr":
+    #             self._save_zarr(ds=ds, prod_dir=prod_dir, key=key, start=start)
+    #         else:
+    #             raise ValueError(f"Unknown storage: {storage}")
+    #         if upload:
+    #             self.upload_files(prod_dir)
 
     def process_key(self, key: (int, int)) -> None:
         """Process some tiles."""
         self._logger.info(f"Processing {key}")
         dataset = self.load_from_grid(key)
-        self._logger.debug(f"- Dataset dims: {dataset.dims}")
-        # Gather start and end times keeping year-month info only
-        times = dataset.time.to_pandas().index.to_period("M").to_timestamp()
-        # Create monthly date range using start of month (MS)
-        dr = pd.date_range(times[0], times[-1], freq="MS")
+        # self._logger.debug(f"- Dataset dims: {dataset.dims}")
+        t1 = datetime.datetime.now()
+        
+        xref = "W" if np.sign(key[0]) == -1 else "E"
+        yref = "S" if np.sign(key[1]) == -1 else "N"
+        xref = xref + str(abs(key[0])).zfill(3)
+        yref = yref + str(abs(key[1])).zfill(3)
+        cellref = yref + xref
+        
+        out_folder = Path(self.temp_dir.name) / 'outputs/predict'
+        out_folder.mkdir(parents=True, exist_ok=True)
+        pelt_out = out_folder / 'PELT' / cellref
+        pelt_out.mkdir(parents=True, exist_ok=True)
 
-        # Process geomedian month by month
-        for start in dr:
-            self._logger.info(f"  - Month starting on {start}")
-            ds = dataset.sel(time=slice(start, start + self.ONE_MONTH))
-            ds = self.mask(ds)
-            ds = self.scale(ds)
-            # ! For the sake of calculation time we'll naively use median rather than geomedian
-            #  ds = self.calculate_geomedian(ds)
-            ds = ds.median(dim='time')
-            ds = ds.persist()
-            # TODO uncomment the self.save line to save the results to s3 Storage
-            wait(ds) # this line isn't required if you save the result
-            # self.save(ds=ds, key=key, start=start)
-            self._logger.debug("    Done.")
+        if self.compute_pelt == 'True':
+            # self.output["prefix"] = self.output["prefix"] + "/" + t1.strftime('%Y%m%d_%H%M%S')
+            
+            # All cloud-masking and scaling is done inside the run_pelt step below
+            pelt_output = self.run_pelt(dataset)
+            pelt_output = pelt_output.compute()
+            # wait(pelt_output) # this line isn't required if you save the result
+            
+            t2 = datetime.datetime.now()
+            self._logger.info(f"PELT processing for {key} took: {t2-t1}")
+
+            # Write to disk
+            self._logger.info(f"Pixels per second: {int((dataset.red.shape[1]*dataset.red.shape[2])/(t2-t1).total_seconds())}")
+            self._logger.info("Writing pelt output to file")
+            
+            # TODO: WHERE DO I NEED TO CUT DOWN THE RESULT?
+            # pad = tile_buffer[0]/30
+            # pelt_output = pelt_output.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+            for bkp in pelt_output['bkp'].values:
+                write_cog(pelt_output.date.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_bks_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan).compute()
+                write_cog(pelt_output.magnitude.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_mgs_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan).compute()
+                # self.save(ds=ds, key=key, start=start, upload=False)
+            if self.upload_files:
+                self.upload_files(pelt_out)
+            self._logger.info("PELT computation complete")
+        else:
+            self.download_folder(pelt_out)
+            fls = list(pelt_out.glob("**/*"))
+            fls.sort()
+            mgs_ = [rioxarray.open_rasterio(f) for f in fls if "mgs" in f.name]
+            mgs = xr.concat(mgs_, dim="band").rename({"band": "bkp"}).transpose("y", "x", "bkp")
+            bks_ = [rioxarray.open_rasterio(f) for f in fls if "bks" in f.name]
+            bks = xr.concat(bks_, dim="band").rename({"band": "bkp"}).transpose("y", "x", "bkp")
+            mgs["bkp"] = range(len(mgs.bkp))
+            bks["bkp"] = range(len(bks.bkp))
+            pelt_output = mgs.to_dataset(name = "magnitude")
+            pelt_output["date"] = bks
+
+            pelt_output.attrs = dataset.attrs
+            
+            if len(pelt_output.bkp) != int(self.pelt_params['n_breaks']):
+                self._logger.error("The loaded data does not have the expected number of breakpoints.")
+                raise
+            self._logger.info("Pelt files loaded from S3")
+
+        for way in self.neighbor_params['ways']:
+            print(f"Polygon: {self.id_}, using: {way}")
+
+            neighs_out = out_folder / 'NEIGHS' / way / cellref
+            neighs_out.mkdir(parents=True, exist_ok=True)
+            
+            t3 = datetime.datetime.now()
+            
+            if self.compute_neighbors == "True":
+                inputImg, pelt_filtered = self.run_neighbors(ds=pelt_output)
+                t4 = datetime.datetime.now()
+                self._logger.info(f"Computing neighbors for {key} took: {t4-t3}")
+                
+                write_cog(inputImg.magnitude, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
+                write_cog(inputImg.ngbh_stdev, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_stdev.tif', overwrite=True, nodata=np.nan)
+                write_cog(inputImg.ngbh_count, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif', overwrite=True, nodata=np.nan)
+                write_cog(pelt_filtered.date, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_date.tif', overwrite=True, nodata=np.nan)
+                write_cog(pelt_filtered.magnitude, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
+                if self.upload_files:
+                    self.upload_files(neighs_out)
+                self._logger.info("Neighbor computation complete")
+            else:
+                self.download_folder(neighs_out)
+                inputImg = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_magnitude.tif') \
+                    .squeeze(drop=True) \
+                    .to_dataset(name = 'magnitude', promote_attrs = True)
+                inputImg[['ngbh_stdev']] = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_stdev.tif') \
+                                                .squeeze(drop=True)
+                inputImg[['ngbh_count']] = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif') \
+                                                .squeeze(drop=True)
+                inputImg.attrs = dataset.attrs
+                for var in inputImg.variables:
+                    inputImg[var].attrs = dataset.attrs
+
+                pelt_filtered = rioxarray.open_rasterio(neighs_out / f'filtered_id{self.id_:03}_{cellref}_magnitude.tif') \
+                    .squeeze(drop=True) \
+                    .to_dataset(name = 'magnitude', promote_attrs = True)
+                pelt_filtered[["date"]] = rioxarray.open_rasterio(neighs_out / f'filtered_id{self.id_:03}_{cellref}_date.tif') \
+                    .squeeze(drop=True)
+                pelt_filtered.attrs = dataset.attrs
+                for var in pelt_filtered.variables:
+                    pelt_filtered[var].attrs = dataset.attrs
+                self._logger.info("Neighbor files loaded from S3")
+
+            glcm_out = out_folder / 'GLCM' / way / cellref
+            glcm_out.mkdir(parents=True, exist_ok=True)
+            
+            t5 = datetime.datetime.now()
+            if self.compute_textures == 'True':
+                inputImg, glcm = self.run_textures(inputImg, pelt_filtered)
+                t6 = datetime.datetime.now()
+                self._logger.info(f"Computing textures for {key} took: {t6-t5}")
+
+                for prop in glcm['prop'].values:
+                    write_cog(glcm.sel({'prop': prop}), fname=f"{str(glcm_out)}/glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif", overwrite=True, nodata=np.nan)
+                
+                if self.upload_files:
+                    self.upload_files(glcm_out)
+
+                # simages.write_to_cogs(glcm, dim = "prop", fname = glcm_out / f"glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif")
+                inputImg = xr.merge([inputImg, glcm.to_dataset(dim="prop", promote_attrs=True)])
+                for var in inputImg.variables:
+                    inputImg[var].attrs['grid_mapping'] = dataset.attrs['grid_mapping']
+                self._logger.info("Texture computation complete")
+            else:
+                textures_names = ['asm', 'contrast', 'corr', 'var', 'idm', 'savg', 'entropy']
+                textures_names.sort()
+                self.download_folder(glcm_out)
+                fls = list(glcm_out.glob("**/*"))
+                fls.sort()
+                tex_ = [rioxarray.open_rasterio(f) for f in fls if f.name.endswith(".tif")]
+                glcm = xr.concat(tex_, dim="band").rename({"band": "prop"}).transpose("y", "x", "prop")
+                glcm["prop"] = textures_names
+                inputImg = xr.merge([inputImg, glcm.to_dataset(dim="prop", promote_attrs=True)])
+                for var in inputImg.variables:
+                    inputImg[var].attrs['grid_mapping'] = dataset.attrs['grid_mapping']
+                self._logger.info("Texture files loaded from S3")
+
+            inputImg = inputImg.compute()
+            rf_out = out_folder / 'RF' / way / cellref
+            rf_out.mkdir(parents=True, exist_ok=True)
+            t7 = datetime.datetime.now()
+
+            if self.compute_rf == "True":
+                sam_bool, sam_mgs, sam_dates = self.run_rf(inputImg, pelt_filtered)
+                t8 = datetime.datetime.now()
+                self._logger.info(f"Computing random forest for {key} took: {t8-t7}")
+                nname = self.rf_params['rf_model'].split('.')[0]
+                write_cog(
+                    geo_im = sam_bool,
+                    fname = rf_out / f"sam_bool_{nname}_{way}_{cellref}.tif",
+                    overwrite = True,
+                    nodata = 255,
+                    compress='LZW'
+                )
+
+                write_cog(
+                    geo_im = sam_mgs,
+                    fname = rf_out / f"sam_mgs_{nname}_{way}_{cellref}.tif",
+                    overwrite = True,
+                    nodata = np.nan,
+                    compress='LZW'
+                )
+
+                write_cog(
+                    geo_im = sam_dates,
+                    fname = rf_out / f"sam_dates_{nname}_{way}_{cellref}.tif",
+                    overwrite = True,
+                    nodata = np.nan,
+                    compress='LZW'
+                )
+                if self.upload_files:
+                    self.upload_files(rf_out)
+                self._logger.info("RF computation complete")
+
+        self._logger.info(f"    Done. {key} took: {t7-t1}")
 
     def process_tile(self) -> None:
         """Process all tiles associated with the keys for this processor."""
@@ -266,6 +578,7 @@ class TileProcessor(ArgoTask):
 
         self._logger.debug("Closing local dask cluster")
         self.close_client()
+        self.temp_dir.cleanup()
 
     def __repr__(self) -> str:
         """Information about this object."""

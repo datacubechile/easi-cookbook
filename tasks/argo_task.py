@@ -2,7 +2,7 @@ import logging
 from json import loads
 from json.decoder import JSONDecodeError
 
-from .common import s3_upload_file
+from .common import s3_upload_file, s3_download_folder
 
 class ArgoTask:
     """
@@ -39,3 +39,10 @@ class ArgoTask:
         A wrapper around `common.s3_upload_file`.
         """
         s3_upload_file(file_name=path, bucket=bucket, object_name=key)
+
+    def s3_download_folder(self, prefix, bucket, path):
+        """Download a file to an S3 object.
+
+        A wrapper around `common.s3_download_files`.
+        """
+        s3_download_folder(prefix=prefix, bucket=bucket, path=path)
