@@ -17,7 +17,8 @@ sys.path.insert(1, '.')
 
 import datetime
 import pandas as pd
-from dask.distributed import Client, LocalCluster, wait
+from dask.distributed import Client, LocalCluster, wait, as_completed
+from datacube import Datacube
 from datacube.api import GridWorkflow
 from datacube.utils.masking import make_mask, mask_invalid_data
 from eodatasets3 import DatasetPrepare
@@ -77,7 +78,7 @@ class TileProcessor(ArgoTask):
 
         self._client = None
         self._cluster = None
-        self.nworkers = 4 if self.nworkers == "" else self.nworkers
+        self.dask_workers = 4 if self.dask_workers == "" else self.dask_workers
 
         self.temp_dir = TemporaryDirectory()
 
@@ -88,7 +89,7 @@ class TileProcessor(ArgoTask):
     def start_client(self) -> None:
         """Start a local dask cluster, if needed."""
         if self._client is None:
-            self._cluster = LocalCluster(n_workers=self.nworkers)
+            self._cluster = LocalCluster(n_workers=self.dask_workers)
             self._client = Client(self._cluster)
             configure_s3_access(aws_unsigned=False, requester_pays=True, client=self._client)
 
@@ -102,29 +103,60 @@ class TileProcessor(ArgoTask):
 
     def load_from_grid(self, key: (int, int)) -> Dataset:
         """Load data from grid flow."""
+        
+        def load_product(product, query, chunks):
+            dc = Datacube()
+            ds = dc.load(product=product, **query)
+            # # Rechunking early seems to be best...
+            ds = ds.chunk(chunks)
+            # # Calculate NDVI
+            ndvi = simages.mask_and_calculate_ndvi(ds)
+            # # Add product name to the output
+            ndvi['product'] = ('time', np.repeat(product, ndvi.time.size))
+            # # Start calculating
+            return ndvi.persist()
+            # result = 1+1
+            # return result
+
         cell = self.product_cells.get(key)
         
         # All geoboxes for the tiles are the same shape. Use this for the chunk size in
         # dask so each tile spatially is a single chunk. Note that the geobox resolution
         # is in (y, x) order
-        chunk_dim = cell.geobox.shape
-        chunks = {"time": 1, "x": chunk_dim[1], "y": chunk_dim[0]}
+
         if self.tile_buffer:
             cell.geobox = cell.geobox.buffered(*self.tile_buffer) if self.tile_buffer else cell.geobox
+
+        chunk_dim = cell.geobox.shape
+        chunks = {"time": 1, "x": chunk_dim[1], "y": chunk_dim[0]}
         try:
-            ds = GridWorkflow.load(
-                cell,
-                measurements=self.measurements,
-                dask_chunks=chunks,
-                # Ignore exceptions until re-indexer is running regularly to
-                # correct for reprocessed data
-                skip_broken_datasets=True,
-            )
-            self._logger.debug(f"Dataset for key {key} has dims: {str(ds.dims)}")
+            dc = Datacube()
+            products = self.product
+            query = {
+                "measurements":["red","nir08","qa_pixel"],
+                "time":("2010-01-01", "2024-03-01"),
+                "like":cell.geobox,
+                "dask_chunks":{"time":4},
+                "group_by":"solar_day"
+            }
+
+            chunks = {'x':int(self.pelt_params['processing_chunk_size']), 'y':int(self.pelt_params['processing_chunk_size']), 'time':-1}
+            
+            # This approach increases parallelisation across the multi-product loads
+            datasets = self._client.map(load_product, products, query=query, chunks=chunks)
+            results = self._client.gather(datasets)
+            wait(results)
+
+            # Concatenate product datasets, make sure chunks are correct and sort on time
+            combined = xr.concat(results, dim='time')
+            combined = combined.chunk(chunks)
+            combined = combined.sortby('time')
+
+            self._logger.debug(f"Dataset for key {key} has dims: {str(combined.dims)}")
         except Exception as e:
             self._logger.error(f"load_from_grid: Exception: {e}")
             raise
-        return ds
+        return combined
 
     def mask(self, ds: Dataset) -> Dataset:
         """Mask clouds and no data in data based on `oa_fmask` values."""
@@ -163,12 +195,27 @@ class TileProcessor(ArgoTask):
         n_breaks = int(self.pelt_params['n_breaks'])
         start_date = self.pelt_params['start_date']
 
+        # Make sure the chunks are right here... concatenating doesn't maintain chunk dimensions
         ds = ds.chunk({'x':int(self.pelt_params['processing_chunk_size']), 'y':int(self.pelt_params['processing_chunk_size']), 'time':-1})
+
+        # ndvi = simages.mask_and_calculate_ndvi(ds)#.compute()
+        # ndvi = ndvi.rechunk({'time':-1, "x": 65, "y": 65})
         
-        ndvi = simages.mask_and_calculate_ndvi(ds)
-        
+        # ds_scattered = self._client.scatter(ds)
+        # pelt_args = {
+        #     'array': ds_scattered,
+        #     'n_breaks':n_breaks, 
+        #     'penalty':penalty, 
+        #     'start_date':start_date,
+        #     'model':model,
+        #     'min_size':min_size,
+        #     'jump': jump,
+        #     'backend': 'dask'
+        # }
+        # future = self._client.submit(spelt.pelt, **pelt_args)
+        # fpelt = self._client.gather(future)
         fpelt = spelt.pelt(
-            array = ndvi,
+            array = ds,
             n_breaks=n_breaks, 
             penalty=penalty, 
             start_date=start_date,
@@ -177,6 +224,7 @@ class TileProcessor(ArgoTask):
             jump = jump,
             backend = 'dask'
         )
+
         fpelt.date.data = spelt.datetime_to_year_fraction(fpelt.date.data.astype('datetime64[s]'))
 
         return fpelt
@@ -278,45 +326,6 @@ class TileProcessor(ArgoTask):
 
         return sam_bool, sam_mgs, sam_dates
 
-    # def _save_cog(
-    #     self,
-    #     ds: Dataset,
-    #     prod_dir: Path,
-    #     key: (int, int),
-    #     start: pd.Timestamp,
-    # ) -> None:
-    #     """Save dataset to local `prod_dir` as datacube indexable COGS."""
-    #     # Set timestamp as last day of month
-    #     ts = start + self.ONE_MONTH - self.ONE_DAY
-    #     metadata_path = prod_dir / "odc-metadata.yaml"
-    #     with DatasetPrepare(metadata_path=metadata_path) as p:
-    #         p.product_family = self.PRODUCT
-    #         p.label = prod_dir.name
-    #         p.datetime = ts.to_pydatetime()
-    #         p.processed_now()
-    #         for measurement in ds.keys():
-    #             path = prod_dir / f"{prod_dir.name}_{measurement}.tif"
-    #             self._logger.debug(f"    Saving COG to {path}")
-    #             ds[measurement].rio.to_raster(path)
-    #             p.note_measurement(
-    #                 measurement.lower(), path.name, relative_to_dataset_location=True
-    #             )
-    #         p.properties["odc:file_format"] = "GeoTIFF"
-    #         p.done(validate_correctness=False)
-    #         self._logger.debug(f"    Saving metadata to {metadata_path}")
-
-    # def _save_zarr(
-    #     self,
-    #     ds: Dataset,
-    #     prod_dir: Path,
-    #     key: (int, int),
-    #     start: pd.Timestamp,
-    # ) -> None:
-    #     """Save dataset to local `prod_dir` as zarr."""
-    #     path = prod_dir / f"{prod_dir.name}.zarr"
-    #     self._logger.debug(f"    Saving {path}")
-    #     ds.to_zarr(store=path)
-
     def download_folder(self, prod_dir: Path) -> None:
         """Download S3 files to `prod_dir`.
 
@@ -351,50 +360,19 @@ class TileProcessor(ArgoTask):
                 key=key,
             )
 
-    # def save(
-    #     self,
-    #     ds: Dataset,
-    #     key: (int, int),
-    #     start: pd.Timestamp,
-    #     storage: str = "cog",
-    #     upload: bool = False
-    # ) -> None:
-    #     """Save dataset to cog or zarr in S3.
-
-    #     The `key` and `start` date are used to format the product name based on
-    #     `PRODUCT_TEMPLATE`. The files are saved to a local temporary directory before
-    #     being uploaded to S3 in the bucket and prefix specified in `self.output`.
-    #     """
-    #     prod_name = self.PRODUCT_TEMPLATE.format(
-    #         product=self.PRODUCT,
-    #         xref=f"{key[0]:+04}".replace("+", "E").replace("-", "W"),
-    #         yref=f"{key[1]:+04}".replace("+", "N").replace("-", "S"),
-    #         year=start.year,
-    #         month=start.month,
-    #     )
-    #     with TemporaryDirectory() as tmpdirname:
-    #         prod_dir = Path(tmpdirname) / prod_name
-    #         prod_dir.mkdir()
-    #         if storage.lower() == "cog":
-    #             self._save_cog(ds=ds, prod_dir=prod_dir, key=key, start=start)
-    #         elif storage.lower() == "zarr":
-    #             self._save_zarr(ds=ds, prod_dir=prod_dir, key=key, start=start)
-    #         else:
-    #             raise ValueError(f"Unknown storage: {storage}")
-    #         if upload:
-    #             self.upload_files(prod_dir)
-
     def process_key(self, key: (int, int)) -> None:
         """Process some tiles."""
         self._logger.info(f"Processing {key}")
+        t0 = datetime.datetime.now()
         dataset = self.load_from_grid(key)
-        # self._logger.debug(f"- Dataset dims: {dataset.dims}")
         t1 = datetime.datetime.now()
+        self._logger.info(f"Data load and initial processing for {key} took: {t1-t0} at {int((dataset.shape[1]*dataset.shape[2])/(t1-t0).total_seconds())} pixels per second")
+
+        self._logger.info(f"Key {key} has shape {dataset.shape}")
+        # self._logger.debug(f"- Dataset dims: {dataset.dims}")
         
-        xref = "W" if np.sign(key[0]) == -1 else "E"
-        yref = "S" if np.sign(key[1]) == -1 else "N"
-        xref = xref + str(abs(key[0])).zfill(3)
-        yref = yref + str(abs(key[1])).zfill(3)
+        xref = f"{key[0]:+04}".replace("+", "E").replace("-", "W")
+        yref = f"{key[1]:+04}".replace("+", "N").replace("-", "S")
         cellref = yref + xref
         
         out_folder = Path(self.temp_dir.name) / 'outputs/predict'
@@ -404,27 +382,27 @@ class TileProcessor(ArgoTask):
 
         if self.compute_pelt == 'True':
             # self.output["prefix"] = self.output["prefix"] + "/" + t1.strftime('%Y%m%d_%H%M%S')
-            
+            t2 = datetime.datetime.now()
+            self._logger.info(f"Starting PELT at {t1}")
             # All cloud-masking and scaling is done inside the run_pelt step below
+            
             pelt_output = self.run_pelt(dataset)
             pelt_output = pelt_output.compute()
             # wait(pelt_output) # this line isn't required if you save the result
             
-            t2 = datetime.datetime.now()
-            self._logger.info(f"PELT processing for {key} took: {t2-t1}")
+            t3 = datetime.datetime.now()
+            self._logger.info(f"Finished PELT at {t2}")
+            self._logger.info(f"PELT processing for {key} took: {t3-t2}")
 
             # Write to disk
-            self._logger.info(f"Pixels per second: {int((dataset.red.shape[1]*dataset.red.shape[2])/(t2-t1).total_seconds())}")
+            self._logger.info(f"Pixels per second: {int((dataset.shape[1]*dataset.shape[2])/(t3-t2).total_seconds())}")
             self._logger.info("Writing pelt output to file")
             
-            # TODO: WHERE DO I NEED TO CUT DOWN THE RESULT?
-            # pad = tile_buffer[0]/30
-            # pelt_output = pelt_output.isel(x=slice(pad,-pad),y=slice(pad,-pad))
             for bkp in pelt_output['bkp'].values:
-                write_cog(pelt_output.date.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_bks_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan).compute()
-                write_cog(pelt_output.magnitude.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_mgs_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan).compute()
+                write_cog(pelt_output.date.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_bks_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan)#.compute()
+                write_cog(pelt_output.magnitude.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_mgs_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan)#.compute()
                 # self.save(ds=ds, key=key, start=start, upload=False)
-            if self.upload_files:
+            if self.output["upload"] == "True":
                 self.upload_files(pelt_out)
             self._logger.info("PELT computation complete")
         else:
@@ -453,19 +431,19 @@ class TileProcessor(ArgoTask):
             neighs_out = out_folder / 'NEIGHS' / way / cellref
             neighs_out.mkdir(parents=True, exist_ok=True)
             
-            t3 = datetime.datetime.now()
+            t4 = datetime.datetime.now()
             
             if self.compute_neighbors == "True":
                 inputImg, pelt_filtered = self.run_neighbors(ds=pelt_output)
-                t4 = datetime.datetime.now()
-                self._logger.info(f"Computing neighbors for {key} took: {t4-t3}")
+                t5 = datetime.datetime.now()
+                self._logger.info(f"Computing neighbors for {key} took: {t5-t4}")
                 
                 write_cog(inputImg.magnitude, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
                 write_cog(inputImg.ngbh_stdev, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_stdev.tif', overwrite=True, nodata=np.nan)
                 write_cog(inputImg.ngbh_count, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif', overwrite=True, nodata=np.nan)
                 write_cog(pelt_filtered.date, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_date.tif', overwrite=True, nodata=np.nan)
                 write_cog(pelt_filtered.magnitude, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
-                if self.upload_files:
+                if self.output["upload"] == "True":
                     self.upload_files(neighs_out)
                 self._logger.info("Neighbor computation complete")
             else:
@@ -494,16 +472,16 @@ class TileProcessor(ArgoTask):
             glcm_out = out_folder / 'GLCM' / way / cellref
             glcm_out.mkdir(parents=True, exist_ok=True)
             
-            t5 = datetime.datetime.now()
+            t6 = datetime.datetime.now()
             if self.compute_textures == 'True':
                 inputImg, glcm = self.run_textures(inputImg, pelt_filtered)
-                t6 = datetime.datetime.now()
-                self._logger.info(f"Computing textures for {key} took: {t6-t5}")
+                t7 = datetime.datetime.now()
+                self._logger.info(f"Computing textures for {key} took: {t7-t6}")
 
                 for prop in glcm['prop'].values:
                     write_cog(glcm.sel({'prop': prop}), fname=f"{str(glcm_out)}/glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif", overwrite=True, nodata=np.nan)
                 
-                if self.upload_files:
+                if self.output["upload"] == "True":
                     self.upload_files(glcm_out)
 
                 # simages.write_to_cogs(glcm, dim = "prop", fname = glcm_out / f"glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif")
@@ -528,12 +506,19 @@ class TileProcessor(ArgoTask):
             inputImg = inputImg.compute()
             rf_out = out_folder / 'RF' / way / cellref
             rf_out.mkdir(parents=True, exist_ok=True)
-            t7 = datetime.datetime.now()
+            t8 = datetime.datetime.now()
 
-            if self.compute_rf == "True":
+            if self.compute_rf == "True":      
                 sam_bool, sam_mgs, sam_dates = self.run_rf(inputImg, pelt_filtered)
-                t8 = datetime.datetime.now()
-                self._logger.info(f"Computing random forest for {key} took: {t8-t7}")
+                t9 = datetime.datetime.now()
+                self._logger.info(f"Computing random forest for {key} took: {t9-t8}")
+
+                # Remove extra buffer pixels before saving
+                pad = int(self.tile_buffer[0]/30)
+                sam_bool = sam_bool.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+                sam_mgs = sam_mgs.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+                sam_dates = sam_dates.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+
                 nname = self.rf_params['rf_model'].split('.')[0]
                 write_cog(
                     geo_im = sam_bool,
@@ -558,11 +543,11 @@ class TileProcessor(ArgoTask):
                     nodata = np.nan,
                     compress='LZW'
                 )
-                if self.upload_files:
+                if self.output["upload"] == "True":
                     self.upload_files(rf_out)
                 self._logger.info("RF computation complete")
 
-        self._logger.info(f"    Done. {key} took: {t7-t1}")
+        self._logger.info(f"    Done. {key} took: {t9-t0}")
 
     def process_tile(self) -> None:
         """Process all tiles associated with the keys for this processor."""

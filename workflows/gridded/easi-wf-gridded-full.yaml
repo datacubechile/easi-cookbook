@@ -6,16 +6,16 @@ metadata:
   generateName: gridded-
   labels:
     name: easi-workflows-gridded
-    owner: woo409
+    owner: jhodge
 
 spec:
-  serviceAccountName: my-team-sa-argo # TODO Replace with values suitable for your deployment environment.
+  serviceAccountName: data-pipelines-default # TODO Replace with values suitable for your deployment environment.
   entrypoint: start
   onExit: exit-handler
   parallelism: 4 # How many pods can execute simultaneously
   artifactGC:
     strategy: OnWorkflowDeletion
-    serviceAccountName: my-team-sa-argo # TODO Replace with values suitable for your deployment environment.
+    serviceAccountName: data-pipelines-default # TODO Replace with values suitable for your deployment environment.
   volumes:
   - name: user-secret-easi-odc-v2 # contains the EASI Hub wide administration secrets to access the database as admin
     secret:
@@ -27,22 +27,34 @@ spec:
   arguments:
     parameters:
     - name: product
-      value: "landsat8_c2l2_sr"
+      value: "['landsat5_c2l2_sr', 'landsat7_c2l2_sr', 'landsat8_c2l2_sr', 'landsat9_c2l2_sr']"
     - name: odc_query
       # Must include output_crs, resolution, group-by
-      value: '{ "output_crs": "epsg:3085", "resolution": [30, 30], "group_by": "solar_day" }'
+      value: '{ "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "origin": [15,15] }'
     - name: measurements
       # Measurements must be valid for the selected product
-      value: '["red", "green", "blue", "pixel_qa"]'  # json list string.
+      value: '["red", "nir08", "qa_pixel"]'  # json list string.
     - name: output # output artifacts are placed here
       # TODO Replace with values suitable for your deployment environment.
-      value: '{"bucket": "my-cluster-dc-data-projects", "prefix": "ngsite/argo-training/woo409/median"}'
+      value: '{"upload": "True", "bucket": "easido-prod-user-scratch", "prefix": "AROAT2ES654NBY3M4X7WD:jhodge"}'
     - name: roi # Region of Interest
-      value: '{"time_start": "2022-01-01", "time_end": "2022-02-28", "boundary": { "type": "Polygon", "crs": { "type": "name", "properties": { "name": "EPSG:4326" } }, "coordinates": [ [ [ 149.21, -35.21 ], [ 149.21,-35.39 ],[ 148.98,-35.39 ], [ 148.98, -35.21 ], [ 149.21, -35.21 ] ] ] } }'
+      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2024-02-15T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
     - name: size                # Tile size in odc_query.output_crs units
-      value: 61440
+      value: 18000
     - name: tiles_per_worker
-      value: 8
+      value: 3
+    - name: dask_workers
+      value: 10
+    - name: tile_buffer
+      value: (1650, 1650)
+    - name: pelt_params
+      value: '{"compute_pelt": "True", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
+    - name: neighbor_params
+      value: '{"compute_neighbors": "True", "ways":["last_negative"], "neighbor_radius": "50"}'
+    - name: texture_params
+      value: '{"compute_textures": "True", "smooth_radius": "15", "glcm_radius": "7"}'
+    - name: rf_params
+      value: '{"compute_rf": "True", "rf_model": "RF_v03_all-trained_negative_of_first.joblib"}'
     - name: dask_image # data-pipeline image to use for Pods
       value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -82,6 +94,8 @@ spec:
             value: "{{workflow.parameters.roi}}"
           - name: size
             value: "{{workflow.parameters.size}}"
+          - name: tile_buffer
+            value: "{{workflow.parameters.tile_buffer}}"
           - name: tiles_per_worker
             value: "{{workflow.parameters.tiles_per_worker}}"
           - name: package-repo
@@ -103,12 +117,26 @@ spec:
         template: tile-processor
         arguments:
           parameters:
+          - name: product
+            value: "{{workflow.parameters.product}}"
           - name: measurements
             value: "{{workflow.parameters.measurements}}"
           - name: output
             value: "{{workflow.parameters.output}}"
           - name: key
             value: "{{item}}"
+          - name: dask_workers
+            value: "{{workflow.parameters.dask_workers}}"
+          - name: tile_buffer
+            value: "{{workflow.parameters.tile_buffer}}"
+          - name: pelt_params
+            value: "{{workflow.parameters.pelt_params}}"
+          - name: neighbor_params
+            value: "{{workflow.parameters.neighbor_params}}"
+          - name: texture_params
+            value: "{{workflow.parameters.texture_params}}"
+          - name: rf_params
+            value: "{{workflow.parameters.rf_params}}"
           - name: package-repo
             value: "{{workflow.parameters.package-repo}}"
           - name: package-branch
@@ -131,6 +159,7 @@ spec:
       - name: roi
       - name: aws_region
       - name: size                  # Tile Size in metres
+      - name: tile_buffer           # Tile buffer to add to each tile - must be a [y,x] or (y,x) in CRS units (e.g. metres)
       - name: tiles_per_worker      # Number of tiles to send to a worker for processing
       - name: git_image
       - name: package-repo          # A sidecar package repo
@@ -226,9 +255,16 @@ spec:
   - name: tile-processor
     inputs:
       parameters:
+      - name: product
       - name: measurements
       - name: output
       - name: key
+      - name: dask_workers
+      - name: tile_buffer
+      - name: pelt_params
+      - name: neighbor_params
+      - name: texture_params
+      - name: rf_params
       - name: package-repo          # A sidecar package repo
       - name: package-branch        # The sidecar package repo branch
       - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows

@@ -61,7 +61,7 @@ def s3_download_folder(prefix:str, bucket:str, path:str):
                     os.makedirs(tmp_dir)
                 else:
                     s3.download_file(bucket, str(key), tmp_dir / key.name)
-    except (ClientError) as e:
+    except (ClientError, KeyError) as e:
         logging.error(e)
         return False
     return True
