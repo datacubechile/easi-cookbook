@@ -12,7 +12,7 @@ import numpy as np
 import rioxarray
 import xarray as xr
 
-sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src/')
+sys.path.insert(1, './lib-samsara/src/')
 sys.path.insert(1, '.')
 
 import datetime
