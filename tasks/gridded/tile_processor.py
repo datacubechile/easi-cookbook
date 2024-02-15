@@ -12,9 +12,6 @@ import numpy as np
 import rioxarray
 import xarray as xr
 
-import time
-time.sleep(7200)
-
 sys.path.insert(1, 'lib-samsara/src/')
 sys.path.insert(1, '.')
 
