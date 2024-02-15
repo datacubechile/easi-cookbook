@@ -8,7 +8,6 @@ from datacube.utils import geometry
 
 from tasks.argo_task import ArgoTask
 from tasks.common import process_order_params, validate_order
-import time
 
 class TileGenerator(ArgoTask):
     FILEPATH_KEYS = "/tmp/keys.json"
@@ -34,7 +33,6 @@ class TileGenerator(ArgoTask):
         self.odc_query = query
 
     def generate_tiles(self) -> None:
-        time.sleep(7200)
         """Build a set of cells based on a grid workflow for the selected product.
 
         The user should have passed some `odc_query` params such as `output_crs`,
