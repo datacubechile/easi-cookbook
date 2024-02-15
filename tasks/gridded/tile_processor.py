@@ -547,7 +547,7 @@ class TileProcessor(ArgoTask):
                     self.upload_files(rf_out)
                 self._logger.info("RF computation complete")
 
-        self._logger.info(f"    Done. {key} took: {t9-t0}")
+        self._logger.info(f"    Done. {key} with shape {dataset.shape} took: {t9-t0}")
 
     def process_tile(self) -> None:
         """Process all tiles associated with the keys for this processor."""
