@@ -99,5 +99,7 @@ class TileGenerator(ArgoTask):
         # Saving the product cells for workers; these are "dc.load-able" metadata
         with open(self.FILEPATH_CELLS, "wb") as outfile:
             pickle.dump(product_cells, outfile)
+        
+        return product_cells
 
 

@@ -12,7 +12,7 @@ import numpy as np
 import rioxarray
 import xarray as xr
 
-sys.path.insert(1, 'lib-samsara/src/')
+sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src')
 sys.path.insert(1, '.')
 
 import datetime
@@ -111,9 +111,11 @@ class TileProcessor(ArgoTask):
             ds = ds.chunk(chunks)
             # # Calculate NDVI
             ndvi = simages.mask_and_calculate_ndvi(ds)
+            ndvi = ndvi.to_dataset(name='ndvi')
             # # Add product name to the output
             ndvi['product'] = ('time', np.repeat(product, ndvi.time.size))
             # # Start calculating
+            ndvi.attrs = ds.attrs
             return ndvi.persist()
             # result = 1+1
             # return result
@@ -133,8 +135,8 @@ class TileProcessor(ArgoTask):
             dc = Datacube()
             products = self.product
             query = {
-                "measurements":["red","nir08","qa_pixel"],
-                "time":("2010-01-01", "2024-03-01"),
+                "measurements": self.measurements,
+                "time":(self.roi["time_start"], self.roi["time_end"]),
                 "like":cell.geobox,
                 "dask_chunks":{"time":4},
                 "group_by":"solar_day"
@@ -225,7 +227,9 @@ class TileProcessor(ArgoTask):
             backend = 'dask'
         )
 
-        fpelt.date.data = spelt.datetime_to_year_fraction(fpelt.date.data.astype('datetime64[s]'))
+        # fpelt.date.data = spelt.datetime_to_year_fraction(fpelt.date.data.astype('datetime64[s]'))
+        # fpelt['date_original'] = fpelt.date
+        # fpelt.date.data = spelt.datetime_to_timestamp(fpelt.date.data.astype('datetime64[s]'))
 
         return fpelt
     
@@ -240,9 +244,9 @@ class TileProcessor(ArgoTask):
         inputImg[['ngbh_count']] = date_cnt
         inputImg.attrs = ds.attrs
         for var in inputImg.variables:
-            inputImg[var].attrs['grid_mapping'] = ds.attrs['grid_mapping']
+            inputImg[var].attrs = ds.attrs
         for var in pelt_filtered.variables:
-            pelt_filtered[var].attrs['grid_mapping'] = ds.attrs['grid_mapping']
+            pelt_filtered[var].attrs = ds.attrs
 
         inputImg = inputImg.compute()
         pelt_filtered = pelt_filtered.compute()
@@ -295,8 +299,8 @@ class TileProcessor(ArgoTask):
     
     def run_rf(self, inputImg: Dataset, pelt_filtered: Dataset) -> (Dataset, Dataset, Dataset):
         rf_model = self.rf_params["rf_model"]
-
-        s3_download_file('products-index/samsara/'+rf_model,'easido-prod-dc-data',self.temp_dir.name)
+        prefix = Path(self.output["prefix"])
+        s3_download_file(str(prefix / rf_model),self.output['bucket'],self.temp_dir.name)
         nname = rf_model.split(".")[0]
         classifier = joblib.load(self.temp_dir.name + '/' + rf_model)
 
@@ -308,7 +312,7 @@ class TileProcessor(ArgoTask):
         classified=classified.chunk({'x':500,'y':500})
 
         # filtrar por landcover especial y alinear a classified
-        s3_download_file('products-index/samsara/LC_union_4y7_cog.tif','easido-prod-dc-data',self.temp_dir.name)
+        s3_download_file(str(prefix / 'LC_union_4y7_cog.tif'),self.output['bucket'],self.temp_dir.name)
         lc_ = xr.load_dataset(self.temp_dir.name+"/LC_union_4y7_cog.tif", engine="rasterio").band_data.squeeze()
         lc = lc_.rio.reproject(inputImg.rio.crs,
                             transform=inputImg.rio.transform(),
@@ -322,7 +326,7 @@ class TileProcessor(ArgoTask):
         sam_mgs = xr.where((classified.y_predict == 1) & (lc.astype(bool)), inputImg.magnitude, np.nan).astype(dtype = "float32").rio.write_crs("epsg:32619", inplace=True).compute()
 
         ## Fechas con cambios
-        sam_dates = xr.where((classified.y_predict == 1) & (lc.astype(bool)) & (inputImg.magnitude.notnull()), pelt_filtered.date, np.nan).astype(dtype = "float32").rio.write_crs("epsg:32619", inplace=True).compute()
+        sam_dates = xr.where((classified.y_predict == 1) & (lc.astype(bool)) & (inputImg.magnitude.notnull()), pelt_filtered.date, 0).astype(dtype = "uint32").rio.write_crs("epsg:32619", inplace=True).compute()
 
         return sam_bool, sam_mgs, sam_dates
 
@@ -365,10 +369,11 @@ class TileProcessor(ArgoTask):
         self._logger.info(f"Processing {key}")
         t0 = datetime.datetime.now()
         dataset = self.load_from_grid(key)
+        dataset = dataset.compute()
         t1 = datetime.datetime.now()
-        self._logger.info(f"Data load and initial processing for {key} took: {t1-t0} at {int((dataset.shape[1]*dataset.shape[2])/(t1-t0).total_seconds())} pixels per second")
+        self._logger.info(f"Data load and initial processing for {key} took: {t1-t0} at {int((dataset.ndvi.shape[1]*dataset.ndvi.shape[2])/(t1-t0).total_seconds())} pixels per second")
 
-        self._logger.info(f"Key {key} has shape {dataset.shape}")
+        self._logger.info(f"Key {key} has shape {dataset.ndvi.shape}")
         # self._logger.debug(f"- Dataset dims: {dataset.dims}")
         
         xref = f"{key[0]:+04}".replace("+", "E").replace("-", "W")
@@ -386,19 +391,26 @@ class TileProcessor(ArgoTask):
             self._logger.info(f"Starting PELT at {t1}")
             # All cloud-masking and scaling is done inside the run_pelt step below
             
-            pelt_output = self.run_pelt(dataset)
+            pelt_output = self.run_pelt(dataset.ndvi)
             pelt_output = pelt_output.compute()
+            # pelt_output['date_original'] = pelt_output.date
+            # pelt_output.date.data = spelt.datetime_to_timestamp(pelt_output.date.data.astype('datetime64[s]'))
+
             # wait(pelt_output) # this line isn't required if you save the result
-            
+            # pelt_output['product'] = dataset.product
             t3 = datetime.datetime.now()
             self._logger.info(f"Finished PELT at {t2}")
             self._logger.info(f"PELT processing for {key} took: {t3-t2}")
 
             # Write to disk
-            self._logger.info(f"Pixels per second: {int((dataset.shape[1]*dataset.shape[2])/(t3-t2).total_seconds())}")
+            self._logger.info(f"Pixels per second: {int((dataset.ndvi.shape[1]*dataset.ndvi.shape[2])/(t3-t2).total_seconds())}")
             self._logger.info("Writing pelt output to file")
             
+            # Write list of products and dates
+            # dataset.to_dataframe()['product'].to_csv(f"{str(pelt_out)}/product_date_list_{cellref}.csv")
+            
             for bkp in pelt_output['bkp'].values:
+                # write_cog(pelt_output.date_original.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_bks_dim-bkp-orig-{bkp}.tif", overwrite=True, nodata=np.nan)
                 write_cog(pelt_output.date.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_bks_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan)#.compute()
                 write_cog(pelt_output.magnitude.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_mgs_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan)#.compute()
                 # self.save(ds=ds, key=key, start=start, upload=False)
@@ -487,7 +499,7 @@ class TileProcessor(ArgoTask):
                 # simages.write_to_cogs(glcm, dim = "prop", fname = glcm_out / f"glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif")
                 inputImg = xr.merge([inputImg, glcm.to_dataset(dim="prop", promote_attrs=True)])
                 for var in inputImg.variables:
-                    inputImg[var].attrs['grid_mapping'] = dataset.attrs['grid_mapping']
+                    inputImg[var].attrs = dataset.attrs
                 self._logger.info("Texture computation complete")
             else:
                 textures_names = ['asm', 'contrast', 'corr', 'var', 'idm', 'savg', 'entropy']
@@ -500,7 +512,7 @@ class TileProcessor(ArgoTask):
                 glcm["prop"] = textures_names
                 inputImg = xr.merge([inputImg, glcm.to_dataset(dim="prop", promote_attrs=True)])
                 for var in inputImg.variables:
-                    inputImg[var].attrs['grid_mapping'] = dataset.attrs['grid_mapping']
+                    inputImg[var].attrs = dataset.attrs
                 self._logger.info("Texture files loaded from S3")
 
             inputImg = inputImg.compute()
@@ -518,6 +530,17 @@ class TileProcessor(ArgoTask):
                 sam_bool = sam_bool.isel(x=slice(pad,-pad),y=slice(pad,-pad))
                 sam_mgs = sam_mgs.isel(x=slice(pad,-pad),y=slice(pad,-pad))
                 sam_dates = sam_dates.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+
+                # Put the product list into its own dataset
+                products=dataset.product.to_dataset(name='product')
+                # Add simple integer product numbering
+                products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',9,np.nan)
+                products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',8,products.product_num)
+                products['product_num'] = xr.where(products.product=='landsat7_c2l2_sr',7,products.product_num)
+                products['product_num'] = xr.where(products.product=='landsat5_c2l2_sr',5,products.product_num)
+                
+                # Match the dates to find the satellite product for each pixel and get rid of any unnecessary dimensions and variables
+                sam_products = products.product_num.where(((products.time.astype(int)*1e-9).astype(int) == sam_dates)).max('time').squeeze().drop_vars('band')
 
                 nname = self.rf_params['rf_model'].split('.')[0]
                 write_cog(
@@ -540,14 +563,23 @@ class TileProcessor(ArgoTask):
                     geo_im = sam_dates,
                     fname = rf_out / f"sam_dates_{nname}_{way}_{cellref}.tif",
                     overwrite = True,
-                    nodata = np.nan,
+                    nodata = 0,
                     compress='LZW'
                 )
+
+                write_cog(
+                    geo_im = sam_products,
+                    fname = rf_out / f"sam_products_{nname}_{way}_{cellref}.tif",
+                    overwrite = True,
+                    nodata = 0,
+                    compress='LZW'
+                )
+
                 if self.output["upload"] == "True":
                     self.upload_files(rf_out)
                 self._logger.info("RF computation complete")
 
-        self._logger.info(f"    Done. {key} with shape {dataset.shape} took: {t9-t0}")
+        self._logger.info(f"    Done. {key} with shape {dataset.ndvi.shape} took: {datetime.datetime.now()-t0}")
 
     def process_tile(self) -> None:
         """Process all tiles associated with the keys for this processor."""
@@ -563,7 +595,7 @@ class TileProcessor(ArgoTask):
 
         self._logger.debug("Closing local dask cluster")
         self.close_client()
-        self.temp_dir.cleanup()
+        # self.temp_dir.cleanup()
 
     def __repr__(self) -> str:
         """Information about this object."""
