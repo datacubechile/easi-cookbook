@@ -358,7 +358,7 @@ class TileProcessor(ArgoTask):
             if not path.is_file():
                 continue
             key = str(prefix / path.relative_to(self.temp_dir.name + "/outputs"))
-            self._logger.debug(f"    Uploading {path} to s3://{bucket}/{key}")
+            self._logger.info(f"    Uploading {path} to s3://{bucket}/{key}")
             self.s3_upload_file(
                 path=str(path),
                 bucket=bucket,
@@ -370,7 +370,7 @@ class TileProcessor(ArgoTask):
         self._logger.info(f"Processing {key}")
         t0 = datetime.datetime.now()
         dataset = self.load_from_grid(key)
-        dataset = dataset.compute()
+        # dataset = dataset.compute()
         t1 = datetime.datetime.now()
         self._logger.info(f"Data load and initial processing for {key} took: {t1-t0} at {int((dataset.ndvi.shape[1]*dataset.ndvi.shape[2])/(t1-t0).total_seconds())} pixels per second")
 

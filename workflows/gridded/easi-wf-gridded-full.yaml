@@ -4,7 +4,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   namespace: easihub
-  generateName: gridded-
+  generateName: samsara-gridded-
   labels:
     name: easi-workflows-gridded
     owner: jhodge
@@ -52,11 +52,11 @@ spec:
     - name: tile_buffer
       value: '[1650, 1650]'
     - name: pelt_params
-      value: '{"compute_pelt": "False", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
+      value: '{"compute_pelt": "True", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
     - name: neighbor_params
-      value: '{"compute_neighbors": "False", "ways":["last_negative"], "neighbor_radius": "50"}'
+      value: '{"compute_neighbors": "True", "ways":["last_negative"], "neighbor_radius": "50"}'
     - name: texture_params
-      value: '{"compute_textures": "False", "smooth_radius": "15", "glcm_radius": "7"}'
+      value: '{"compute_textures": "True", "smooth_radius": "15", "glcm_radius": "7"}'
     - name: rf_params
       value: '{"compute_rf": "True", "rf_model": "RF_v03_all-trained_negative_of_first.joblib"}'
     - name: dask_image # data-pipeline image to use for Pods
@@ -125,6 +125,8 @@ spec:
             value: "{{workflow.parameters.product}}"
           - name: measurements
             value: "{{workflow.parameters.measurements}}"
+          - name: roi
+            value: "{{workflow.parameters.roi}}"
           - name: output
             value: "{{workflow.parameters.output}}"
           - name: key
@@ -261,6 +263,7 @@ spec:
       parameters:
       - name: product
       - name: measurements
+      - name: roi
       - name: output
       - name: key
       - name: dask_workers
