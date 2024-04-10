@@ -370,7 +370,7 @@ class TileProcessor(ArgoTask):
         self._logger.info(f"Processing {key}")
         t0 = datetime.datetime.now()
         dataset = self.load_from_grid(key)
-        # dataset = dataset.compute()
+        ds_product = dataset.product.compute()
         t1 = datetime.datetime.now()
         self._logger.info(f"Data load and initial processing for {key} took: {t1-t0} at {int((dataset.ndvi.shape[1]*dataset.ndvi.shape[2])/(t1-t0).total_seconds())} pixels per second")
 
@@ -533,7 +533,7 @@ class TileProcessor(ArgoTask):
                 sam_dates = sam_dates.isel(x=slice(pad,-pad),y=slice(pad,-pad))
 
                 # Put the product list into its own dataset
-                products=dataset.product.to_dataset(name='product')
+                products=ds_product.to_dataset(name='product')
                 # Add simple integer product numbering
                 products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',9,np.nan)
                 products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',8,products.product_num)

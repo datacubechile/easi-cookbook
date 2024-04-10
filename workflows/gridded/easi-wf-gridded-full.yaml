@@ -48,7 +48,7 @@ spec:
     - name: tiles_per_worker
       value: 2
     - name: dask_workers
-      value: 10
+      value: 8
     - name: tile_buffer
       value: '[1650, 1650]'
     - name: pelt_params
