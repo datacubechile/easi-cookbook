@@ -1,0 +1,34 @@
+---
+name: samsara_new
+description: Samsara data
+metadata_type: eo3
+
+metadata:
+  product:
+    name: samsara_new
+
+# load:
+#   resolution: {x: 30, y: -30}
+#   crs: EPSG:3857
+
+# storage:
+#   origin: {x: 15, y: 5}
+
+measurements:
+  - name: "mag"
+    aliases: [magnitude, MAG, change]
+    units: "1"
+    dtype: float32
+    nodata: NaN
+  
+  # - name: "dates"
+  #   aliases: [DATES, date, DATE, dt, DT]
+  #   units: "1"
+  #   dtype: float32
+  #   nodata: NaN
+  
+  # - name: "bool"
+  #   aliases: [BOOL]
+  #   units: "1"
+  #   dtype: float32
+  #   nodata: 0

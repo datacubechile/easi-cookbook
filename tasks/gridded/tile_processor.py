@@ -12,7 +12,7 @@ import numpy as np
 import rioxarray
 import xarray as xr
 
-# sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src')
+sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src')
 sys.path.insert(1, 'lib-samsara/src/')
 sys.path.insert(1, '.')
 
@@ -40,6 +40,9 @@ import samsara.filter as sfilter
 import samsara.stats.neighborhood as sns
 import samsara.kernel as skernel
 import samsara.stats.glcm as sglcm
+
+logging.getLogger("rasterio").setLevel(logging.ERROR)
+logging.getLogger('botocore').setLevel(logging.WARNING)
 
 class TileProcessor(ArgoTask):
     PRODUCT = "landsat8_geomedian_monthly"

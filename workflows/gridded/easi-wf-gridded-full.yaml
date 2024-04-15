@@ -40,7 +40,7 @@ spec:
       value: '["red", "nir08", "qa_pixel"]'  # json list string.
     - name: output # output artifacts are placed here
       # TODO Replace with values suitable for your deployment environment.
-      value: '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/"}'
+      value: '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final-prefix": "products-index/samsara-new/"}'
     - name: roi # Region of Interest
       value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2024-02-15T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
     - name: size # Tile size in odc_query.output_crs units
@@ -58,7 +58,7 @@ spec:
     - name: texture_params
       value: '{"compute_textures": "True", "smooth_radius": "15", "glcm_radius": "7"}'
     - name: rf_params
-      value: '{"compute_rf": "True", "rf_model": "RF_v03_all-trained_negative_of_first.joblib"}'
+      value: '{"compute_rf": "False", "rf_model": "RF_v03_all-trained_negative_of_first.joblib"}'
     - name: dask_image # data-pipeline image to use for Pods
       value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -155,6 +155,48 @@ spec:
           - name: product_cells
             from: "{{steps.tile-generator.outputs.artifacts.product_cells}}"
         withParam: "{{steps.tile-generator.outputs.parameters.keys}}"
+    - - name: assembler
+        template: assembler
+        arguments:
+          parameters:
+          - name: product
+            value: "{{workflow.parameters.product}}"
+          - name: odc_query
+            value: "{{workflow.parameters.odc_query}}"
+          - name: roi
+            value: "{{workflow.parameters.roi}}"
+          - name: output
+            value: "{{workflow.parameters.output}}"
+          - name: package-repo
+            value: "{{workflow.parameters.package-repo}}"
+          - name: package-branch
+            value: "{{workflow.parameters.package-branch}}"
+          - name: package-path
+            value: "{{workflow.parameters.package-path}}"
+          - name: package-secret
+            value: "{{workflow.parameters.package-secret}}"
+    - - name: finaliser
+        template: finaliser
+        arguments:
+          parameters:
+          - name: output
+            value: "{{workflow.parameters.output}}"
+          - name: way
+            value: "{{steps.assembler.outputs.parameters.way}}"
+          - name: dates_idx
+            value: "{{item}}"
+          - name: package-repo
+            value: "{{workflow.parameters.package-repo}}"
+          - name: package-branch
+            value: "{{workflow.parameters.package-branch}}"
+          - name: package-path
+            value: "{{workflow.parameters.package-path}}"
+          - name: package-secret
+            value: "{{workflow.parameters.package-secret}}"
+          artifacts:
+            - name: dates
+              from: "{{steps.assembler.outputs.artifacts.dates}}"
+        withParam: "{{steps.assembler.outputs.parameters.dates_idx}}"
 
 ##--------------------------------
   - name: tile-generator
@@ -280,9 +322,9 @@ spec:
       - name: product_cells
         path: /tmp/product_cells.pickle
 
-    activeDeadlineSeconds: 3540 # Runtime shouldn't exceed 60 minutes - this is here to allow for Dask scheduler lockups or other issues
+    # activeDeadlineSeconds: 3540 # Runtime shouldn't exceed 60 minutes - this is here to allow for Dask scheduler lockups or other issues
     retryStrategy:
-      limit: "2"
+      limit: "3"
 
     volumes:
       - name: git-sync
@@ -348,11 +390,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 32Gi
-          cpu: 8000m
+          memory: 2Gi #32Gi
+          cpu: 2000m #8000m
         requests:
-          memory: 26Gi
-          cpu: 7000m
+          memory: 1Gi #26Gi
+          cpu: 1000m #7000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -375,6 +417,203 @@ spec:
           processor.process_tile()
           logging.info("Completed tile processing.")
 
+##--------------------------------
+  - name: assembler
+    inputs:
+      parameters:
+      - name: product
+      - name: odc_query
+      - name: output
+      - name: roi
+      - name: package-repo          # A sidecar package repo
+      - name: package-branch        # The sidecar package repo branch
+      - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
+      - name: package-secret        # Git-credentials format, e.g. git-credentials: $(echo -n "https://username:password@dev.azure.com | base64)
+    
+    outputs:
+      parameters:
+      - name: way
+        valueFrom:
+          path: /tmp/way
+      artifacts:
+      - name: dates
+        path: /tmp/dates
+
+    retryStrategy:
+      limit: "3"
+
+    volumes:
+      - name: git-sync
+        emptyDir: {}
+      - name: git-secret
+        secret:
+          secretName: azure-devops-easi-hub-git-ro-creds
+          items:
+            - key: git-credentials
+              path: .git-credentials
+
+    initContainers:
+      - name: init1
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: true
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            mkdir easiwf
+            cd easiwf
+            git config --global credential.helper "store --file /secret/git/.git-credentials" &&
+            git clone --depth 1 --branch main https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows
+      - name: init1
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: false
+        volumeMounts:
+          - name: git-sync
+            mountPath: "{{inputs.parameters.package-path}}"
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            git clone --depth 1 --branch jhodge-edits https://github.com/Data-Observatory/lib-samsara.git
+
+    script:
+      image: "{{workflow.parameters.dask_image}}"
+      imagePullPolicy: Always
+      env:
+        - name: AWS_METADATA_SERVICE_TIMEOUT
+          value: '30'
+        - name: AWS_METADATA_SERVICE_NUM_ATTEMPTS
+          value: '5'
+        - name: DATACUBE_CONFIG_PATH
+          value: "/root/.user-secret-easi-odc-v2/.datacube.conf"
+      volumeMounts:
+        - name: user-secret-easi-odc-v2
+          mountPath: '/root/.user-secret-easi-odc-v2'
+          readOnly: true
+        - name: git-sync
+          mountPath: "{{inputs.parameters.package-path}}"
+        # - name: git-secret
+        #   mountPath: "/secret/git"
+      resources: # limit the resources
+        limits:
+          memory: 8Gi
+          cpu: 8000m
+        requests:
+          memory: 2Gi
+          cpu: 2000m
+      workingDir: "{{inputs.parameters.package-path}}"
+      command: [python]
+      source: |
+        import sys
+        from pathlib import Path
+        sys.path.insert(1, '/home/jovyan/SAMSARA/easi-cookbook')
+        from tasks.gridded.finaliser import Assemble
+
+        package_path        = "{{inputs.parameters.package-path}}"
+        package_repo        = "https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows"
+        
+        repo = Path(package_path) / 'easiwf' / package_repo.split('/')[-1] / 'tasks' / 'eo3assemble'
+        sys.path.insert(1, str(eo3assemble))
+        
+        assembler = Assemble(params_assembler)
+        assembler.assemble()
+
+##--------------------------------
+  - name: finaliser
+    inputs:
+      parameters:
+      - name: output
+      - name: way
+      - name: dates_idx
+      - name: package-repo          # A sidecar package repo
+      - name: package-branch        # The sidecar package repo branch
+      - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
+      - name: package-secret        # Git-credentials format, e.g. git-credentials: $(echo -n "https://username:password@dev.azure.com | base64)
+      artifacts:
+      - name: dates
+        path: /tmp/dates
+
+    retryStrategy:
+      limit: "3"
+
+    volumes:
+      - name: git-sync
+        emptyDir: {}
+      - name: git-secret
+        secret:
+          secretName: azure-devops-easi-hub-git-ro-creds
+          items:
+            - key: git-credentials
+              path: .git-credentials
+
+    initContainers:
+      - name: init1
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: true
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            mkdir easiwf
+            cd easiwf
+            git config --global credential.helper "store --file /secret/git/.git-credentials" &&
+            git clone --depth 1 --branch main https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows
+      - name: init1
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: false
+        volumeMounts:
+          - name: git-sync
+            mountPath: "{{inputs.parameters.package-path}}"
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            git clone --depth 1 --branch jhodge-edits https://github.com/Data-Observatory/lib-samsara.git
+
+    script:
+      image: "{{workflow.parameters.dask_image}}"
+      imagePullPolicy: Always
+      env:
+        - name: AWS_METADATA_SERVICE_TIMEOUT
+          value: '30'
+        - name: AWS_METADATA_SERVICE_NUM_ATTEMPTS
+          value: '5'
+        - name: DATACUBE_CONFIG_PATH
+          value: "/root/.user-secret-easi-odc-v2/.datacube.conf"
+      volumeMounts:
+        - name: user-secret-easi-odc-v2
+          mountPath: '/root/.user-secret-easi-odc-v2'
+          readOnly: true
+        - name: git-sync
+          mountPath: "{{inputs.parameters.package-path}}"
+        # - name: git-secret
+        #   mountPath: "/secret/git"
+      resources: # limit the resources
+        limits:
+          memory: 8Gi
+          cpu: 8000m
+        requests:
+          memory: 2Gi
+          cpu: 2000m
+      workingDir: "{{inputs.parameters.package-path}}"
+      command: [python]
+      source: |
+        import sys
+        from pathlib import Path
+        sys.path.insert(1, '/home/jovyan/SAMSARA/easi-cookbook')
+        from tasks.gridded.finaliser import Finalise
+
+        package_path        = "{{inputs.parameters.package-path}}"
+        package_repo        = "https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows"
+        
+        repo = Path(package_path) / 'easiwf' / package_repo.split('/')[-1] / 'tasks' / 'eo3assemble'
+        sys.path.insert(1, str(eo3assemble))
+        
+        finaliser = Finalise(params_finaliser)
+        finaliser.finalise()
+
+
+      
 ##--------------------------------
   # Exit handler templates
   # After the completion of the entrypoint template, the status of the
