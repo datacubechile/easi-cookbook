@@ -8,9 +8,6 @@ import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import sleep
-sleep(3600)
-
 sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src')
 sys.path.insert(1, 'lib-samsara/src/')
 sys.path.insert(1, '.')

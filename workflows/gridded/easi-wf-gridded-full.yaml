@@ -46,9 +46,9 @@ spec:
     - name: size # Tile size in odc_query.output_crs units
       value: 18000
     - name: tiles_per_worker
-      value: 2
+      value: 3
     - name: dask_workers
-      value: 4
+      value: 8
     - name: tile_buffer
       value: '[1650, 1650]'
     - name: pelt_params
@@ -429,7 +429,7 @@ spec:
       - name: package-branch        # The sidecar package repo branch
       - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
       - name: package-secret        # Git-credentials format, e.g. git-credentials: $(echo -n "https://username:password@dev.azure.com | base64)
-    
+
     outputs:
       parameters:
       - name: way
@@ -468,8 +468,6 @@ spec:
           - cd "{{inputs.parameters.package-path}}" &&
             mkdir easiwf &&
             cd easiwf &&
-            ls / -lah &&
-            ls ~ -lah &&
             git config --global credential.helper "store --file /secret/git/.git-credentials" &&
             git clone --depth 1 --branch main https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows
       - name: init1
@@ -514,10 +512,14 @@ spec:
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
-        import sys
-        from pathlib import Path
-        sys.path.insert(1, '/home/jovyan/SAMSARA/easi-cookbook')
-        from tasks.gridded.finaliser import Assemble
+        package_path = "{{inputs.parameters.package-path}}"
+        package_repo = "{{inputs.parameters.package-repo}}"
+        repo = Path(package_path) / package_repo.split('/')[-1]
+        sys.path.insert(1, str(repo))
+
+        logging.basicConfig(level=logging.INFO)
+
+        # from tasks.gridded.finaliser import Assemble
 
         package_path        = "{{inputs.parameters.package-path}}"
         package_repo        = "https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows"
@@ -525,8 +527,10 @@ spec:
         repo = Path(package_path) / 'easiwf' / package_repo.split('/')[-1] / 'tasks' / 'eo3assemble'
         sys.path.insert(1, str(eo3assemble))
         
-        assembler = Assemble(params_assembler)
-        assembler.assemble()
+
+
+        # assembler = Assemble(params_assembler)
+        # assembler.assemble()
 
 ##--------------------------------
   - name: finaliser
@@ -608,9 +612,12 @@ spec:
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
-        import sys
-        from pathlib import Path
-        sys.path.insert(1, '/home/jovyan/SAMSARA/easi-cookbook')
+        package_path = "{{inputs.parameters.package-path}}"
+        package_repo = "{{inputs.parameters.package-repo}}"
+        repo = Path(package_path) / package_repo.split('/')[-1]
+        sys.path.insert(1, str(repo))
+
+        logging.basicConfig(level=logging.INFO)
         from tasks.gridded.finaliser import Finalise
 
         package_path        = "{{inputs.parameters.package-path}}"
