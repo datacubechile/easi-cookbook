@@ -207,6 +207,9 @@ class Finalise(ArgoTask):
 
         self.temp_dir = TemporaryDirectory()
 
+        with open('/tmp/dates', "r") as f:
+            self.dates = json.load(f)
+
     def finalise(self) -> None:
         # # bksi = (dates * 1000).round()
         # sam_timestamps = dates_data.where(dates_data != 0)
@@ -221,11 +224,8 @@ class Finalise(ArgoTask):
         # timestamps = (datetimes.astype(int)*1e-09).astype(int)
 
         # dates = datetimes.dt.strftime("%Y-%m-%d").values
-        dates = [["20160106", "20160107", "20160108", "20160114", "20160115", "20160116", "20160122", "20160123", "20160124", "20160130"]]
 
-        dates_idx = self.dates_idx
-        dates = dates[int(dates_idx)]
-        self.dates = dates
+        dates = self.dates[int(self.dates_idx)]
 
         for date in self.dates:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()

@@ -499,17 +499,15 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 8Gi
-          cpu: 8000m
+          memory: 4Gi
+          cpu: 4000m
         requests:
-          memory: 2Gi
-          cpu: 2000m
+          memory: 1Gi
+          cpu: 1000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
         if __name__ == "__main__":
-          import time
-          time.sleep(3600)
           import sys
           import json
           import logging
@@ -566,17 +564,25 @@ spec:
         command: [/bin/sh, -c]
         args:
           - cd "{{inputs.parameters.package-path}}" &&
+            git clone --depth 1 --branch "{{inputs.parameters.package-branch}}" "{{inputs.parameters.package-repo}}"
+      - name: init1
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: true
+        volumeMounts:
+          - name: git-secret
+            mountPath: "/secret/git"
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
             mkdir easiwf &&
             cd easiwf &&
             git config --global credential.helper "store --file /secret/git/.git-credentials" &&
             git clone --depth 1 --branch main https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows
-      - name: init1
+      - name: init2
         image: "{{workflow.parameters.git_image}}"
         imagePullPolicy: IfNotPresent
-        mirrorVolumeMounts: false
-        volumeMounts:
-          - name: git-sync
-            mountPath: "{{inputs.parameters.package-path}}"
+        mirrorVolumeMounts: true
         command: [/bin/sh, -c]
         args:
           - cd "{{inputs.parameters.package-path}}" &&
@@ -602,11 +608,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 8Gi
-          cpu: 8000m
-        requests:
           memory: 2Gi
-          cpu: 2000m
+          cpu: 1000m
+        requests:
+          memory: 1Gi
+          cpu: 1000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -622,7 +628,7 @@ spec:
           sys.path.insert(1, str(repo))
 
           logging.basicConfig(level=logging.INFO)
-          
+
           from tasks.gridded.finaliser import Finalise
           
           finaliser = Finalise({{inputs.parameters}})
