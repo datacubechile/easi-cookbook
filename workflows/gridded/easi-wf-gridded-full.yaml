@@ -48,15 +48,15 @@ spec:
     - name: tiles_per_worker
       value: 2
     - name: dask_workers
-      value: 8
+      value: 4
     - name: tile_buffer
       value: '[1650, 1650]'
     - name: pelt_params
-      value: '{"compute_pelt": "True", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
+      value: '{"compute_pelt": "False", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
     - name: neighbor_params
-      value: '{"compute_neighbors": "True", "ways":["last_negative"], "neighbor_radius": "50"}'
+      value: '{"compute_neighbors": "False", "ways":["last_negative"], "neighbor_radius": "50"}'
     - name: texture_params
-      value: '{"compute_textures": "True", "smooth_radius": "15", "glcm_radius": "7"}'
+      value: '{"compute_textures": "False", "smooth_radius": "15", "glcm_radius": "7"}'
     - name: rf_params
       value: '{"compute_rf": "False", "rf_model": "RF_v03_all-trained_negative_of_first.joblib"}'
     - name: dask_image # data-pipeline image to use for Pods
@@ -390,11 +390,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 2Gi #32Gi
-          cpu: 2000m #8000m
+          memory: 8Gi #32Gi
+          cpu: 4000m #8000m
         requests:
-          memory: 1Gi #26Gi
-          cpu: 1000m #7000m
+          memory: 4Gi #26Gi
+          cpu: 2000m #7000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -435,6 +435,9 @@ spec:
       - name: way
         valueFrom:
           path: /tmp/way
+      - name: dates_idx
+        valueFrom:
+          path: /tmp/dates_idx
       artifacts:
       - name: dates
         path: /tmp/dates
