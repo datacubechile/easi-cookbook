@@ -371,9 +371,7 @@ class TileProcessor(ArgoTask):
     def process_key(self, key: (int, int)) -> None:
         """Process some tiles."""
         self._logger.info(f"Processing {key}")
-        if (not self.compute_pelt and not self.compute_neighbors and not self.compute_textures and not self.compute_rf):
-            self._logger.info(f"No processing required for {key}")
-            return
+
         t0 = datetime.datetime.now()
         dataset = self.load_from_grid(key)
         ds_product = dataset.product.compute()
@@ -593,6 +591,10 @@ class TileProcessor(ArgoTask):
         for log in ['distributed', 'distributed.nanny','distributed.scheduler','distributed.client']:
             logger = logging.getLogger(log)
             logger.setLevel(logging.ERROR)
+
+        if (self.compute_pelt == 'False' and self.compute_neighbors == 'False' and self.compute_textures == 'False' and self.compute_rf == 'False'):
+            self._logger.info(f"No processing required for {key}")
+            return
 
         self._logger.debug("Initialising local dask cluster")
         self.start_client()
