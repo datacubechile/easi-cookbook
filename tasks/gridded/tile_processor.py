@@ -593,7 +593,7 @@ class TileProcessor(ArgoTask):
             logger.setLevel(logging.ERROR)
 
         if (self.compute_pelt == 'False' and self.compute_neighbors == 'False' and self.compute_textures == 'False' and self.compute_rf == 'False'):
-            self._logger.info(f"No processing required for {key}")
+            self._logger.info(f"No processing required for {self.key[0]}")
             return
 
         self._logger.debug("Initialising local dask cluster")
