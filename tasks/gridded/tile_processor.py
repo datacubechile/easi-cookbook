@@ -539,7 +539,7 @@ class TileProcessor(ArgoTask):
                 # Put the product list into its own dataset
                 products=ds_product.to_dataset(name='product')
                 # Add simple integer product numbering
-                products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',9,np.nan)
+                products['product_num'] = xr.where(products.product=='landsat9_c2l2_sr',9,np.nan)
                 products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',8,products.product_num)
                 products['product_num'] = xr.where(products.product=='landsat7_c2l2_sr',7,products.product_num)
                 products['product_num'] = xr.where(products.product=='landsat5_c2l2_sr',5,products.product_num)

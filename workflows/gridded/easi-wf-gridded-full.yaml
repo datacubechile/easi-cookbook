@@ -155,7 +155,7 @@ spec:
           - name: product_cells
             from: "{{steps.tile-generator.outputs.artifacts.product_cells}}"
         withParam: "{{steps.tile-generator.outputs.parameters.keys}}"
-        when: "{{steps.tile-generator.outputs.parameters.processing_required}} == true"
+        when: "{{steps.tile-generator.outputs.parameters.processing_required}} == True"
     - - name: assembler
         template: assembler
         arguments:
