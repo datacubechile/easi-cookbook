@@ -372,7 +372,7 @@ class TileProcessor(ArgoTask):
         """Process some tiles."""
         self._logger.info(f"Processing {key}")
         if (not self.compute_pelt and not self.compute_neighbors and not self.compute_textures and not self.compute_rf):
-            self._logger.info("No processing required for {key}"
+            self._logger.info(f"No processing required for {key}")
             return
         t0 = datetime.datetime.now()
         dataset = self.load_from_grid(key)
