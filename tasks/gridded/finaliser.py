@@ -186,7 +186,7 @@ class Assemble(ArgoTask):
 
         with open('/tmp/way', 'w') as outfile:
             outfile.write([f.name for f in os.scandir(path) if f.is_dir()][0])
-            
+
         return ds, sam_timestamps
 
 class Finalise(ArgoTask):
@@ -222,7 +222,7 @@ class Finalise(ArgoTask):
 
             # Download data
             bucket = self.output["bucket"]
-            prefix = str(Path(self.output['prefix']) / 'predict' / 'final')
+            prefix = str(Path(self.output['prefix']) / 'final')
             path = Path(self.temp_dir.name)
 
             self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {path}")

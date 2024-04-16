@@ -302,12 +302,12 @@ spec:
         generator = TileGenerator({{inputs.parameters}})
         generator.generate_tiles()
 
-        pelt_params = json.loads("{{workflow.parameters.pelt_params}}")
-        neighbor_params = json.loads("{{workflow.parameters.neighbor_params}}")
-        texture_params = json.loads("{{workflow.parameters.texture_params}}")
-        rf_params = json.loads("{{workflow.parameters.rf_params}}")
+        pelt_params = {{workflow.parameters.pelt_params}}
+        neighbor_params = {{workflow.parameters.neighbor_params}}
+        texture_params = {{workflow.parameters.texture_params}}
+        rf_params = {{workflow.parameters.rf_params}}
 
-        processing_required = (pelt_params['compute_pelt'] == 'True' or neighbor_params['compute_neighbors'] == 'True' or texture_params['compute_textures'] == 'True' or rf_params['compute_rf'] == 'True')
+        processing_required = str(pelt_params['compute_pelt'] == 'True' or neighbor_params['compute_neighbors'] == 'True' or texture_params['compute_textures'] == 'True' or rf_params['compute_rf'] == 'True')
         
         with open('/tmp/processing_required', 'w') as outfile:
             outfile.write(processing_required)
