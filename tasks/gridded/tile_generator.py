@@ -99,12 +99,5 @@ class TileGenerator(ArgoTask):
         # Saving the product cells for workers; these are "dc.load-able" metadata
         with open(self.FILEPATH_CELLS, "wb") as outfile:
             pickle.dump(product_cells, outfile)
-        
-        processing_required = self.compute_pelt == 'True' or self.compute_neighbors == 'True' or self.compute_textures == 'True' or self.compute_rf == 'True'
-        
-        with open('/tmp/processing_required', 'w') as outfile:
-            outfile.write(processing_required)
-
-        return processing_required
 
 

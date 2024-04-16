@@ -300,9 +300,17 @@ spec:
         from tasks.gridded.tile_generator import TileGenerator
 
         generator = TileGenerator({{inputs.parameters}})
-        processing_required = generator.generate_tiles()
+        generator.generate_tiles()
 
-        print(processing_required)
+        pelt_params = json.loads("{{workflow.parameters.pelt_params}}")
+        neighbor_params = json.loads("{{workflow.parameters.neighbor_params}}")
+        texture_params = json.loads("{{workflow.parameters.texture_params}}")
+        rf_params = json.loads("{{workflow.parameters.rf_params}}")
+
+        processing_required = (pelt_params['compute_pelt'] == 'True' or neighbor_params['compute_neighbors'] == 'True' or texture_params['compute_textures'] == 'True' or rf_params['compute_rf'] == 'True')
+        
+        with open('/tmp/processing_required', 'w') as outfile:
+            outfile.write(processing_required)
 
         logging.info("Completed tile generation.")
 
