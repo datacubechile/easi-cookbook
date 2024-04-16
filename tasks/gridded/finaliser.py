@@ -211,23 +211,7 @@ class Finalise(ArgoTask):
             self.dates = json.load(f)
 
     def finalise(self) -> None:
-        # # bksi = (dates * 1000).round()
-        # sam_timestamps = dates_data.where(dates_data != 0)
-        # coords_ = {"time": ds.coords["time"].values, "y": mgs.coords["y"].values, "x": mgs.coords["x"].values}
-        # dims_ = {"time": ds.dims["time"], "y": mgs.shape[0], "x": mgs.shape[1]}
-        # # bks_ = xr.DataArray(np.nan, coords_, ds2.dims)
-        # # bks_.attrs = ds2.attrs
-
-        # # Remove dates before the start of the identified breaks
-        # datetimes = ds.time.where(ds.time.dt.year >= datetime.datetime.fromtimestamp(sam_timestamps.min().values.item()).year,drop=True)
-        # # timey = ((datetimes.dt.year + (datetimes.dt.dayofyear - 1) / 365) * 1000).round()
-        # timestamps = (datetimes.astype(int)*1e-09).astype(int)
-
-        # dates = datetimes.dt.strftime("%Y-%m-%d").values
-
-        dates = self.dates[int(self.dates_idx)]
-
-        for date in self.dates:
+        for date in self.dates[int(self.dates_idx)]:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
             self._logger.info(f"Processing {date}")
 
