@@ -40,7 +40,7 @@ spec:
       value: '["red", "nir08", "qa_pixel"]'  # json list string.
     - name: output # output artifacts are placed here
       # TODO Replace with values suitable for your deployment environment.
-      value: '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final-prefix": "products-index/samsara-raw/"}'
+      value: '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final_prefix": "products-index/samsara-raw/"}'
     - name: roi # Region of Interest
       value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2024-02-15T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
     - name: size # Tile size in odc_query.output_crs units
@@ -239,8 +239,8 @@ spec:
       #         path: .git-credentials
 
     initContainers:
-      - name: init1
-        image: "{{inputs.parameters.git_image}}"
+      - name: init0
+        image: "{{workflow.parameters.git_image}}"
         imagePullPolicy: IfNotPresent
         mirrorVolumeMounts: true
         command: [/bin/sh, -c]
@@ -254,7 +254,7 @@ spec:
 
     script:
       image: "{{workflow.parameters.dask_image}}"
-      imagePullPolicy: Always
+      imagePullPolicy: IfNotPresent
       env:
         - name: AWS_METADATA_SERVICE_TIMEOUT
           value: '30'
@@ -372,7 +372,7 @@ spec:
 
     script:
       image: "{{workflow.parameters.dask_image}}"
-      imagePullPolicy: Always
+      imagePullPolicy: IfNotPresent
       env:
         - name: AWS_METADATA_SERVICE_TIMEOUT
           value: '30'
@@ -390,11 +390,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 2Gi #32Gi
-          cpu: 2000m #8000m
+          memory: 1Gi #32Gi
+          cpu: 1000m #8000m
         requests:
-          memory: 1Gi #26Gi
-          cpu: 1000m #7000m
+          memory: 500Mi #26Gi
+          cpu: 500m #7000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -456,15 +456,20 @@ spec:
               path: .git-credentials
 
     initContainers:
-      - name: init1
+      - name: init0
         image: "{{workflow.parameters.git_image}}"
         imagePullPolicy: IfNotPresent
         mirrorVolumeMounts: true
+        volumeMounts:
+          - name: git-secret
+            mountPath: "/secret/git"
         command: [/bin/sh, -c]
         args:
           - cd "{{inputs.parameters.package-path}}" &&
-            mkdir easiwf
-            cd easiwf
+            mkdir easiwf &&
+            cd easiwf &&
+            ls / -lah &&
+            ls ~ -lah &&
             git config --global credential.helper "store --file /secret/git/.git-credentials" &&
             git clone --depth 1 --branch main https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows
       - name: init1
@@ -474,6 +479,8 @@ spec:
         volumeMounts:
           - name: git-sync
             mountPath: "{{inputs.parameters.package-path}}"
+          - name: git-secret
+            mountPath: "/secret/git"
         command: [/bin/sh, -c]
         args:
           - cd "{{inputs.parameters.package-path}}" &&
@@ -481,7 +488,7 @@ spec:
 
     script:
       image: "{{workflow.parameters.dask_image}}"
-      imagePullPolicy: Always
+      imagePullPolicy: IfNotPresent
       env:
         - name: AWS_METADATA_SERVICE_TIMEOUT
           value: '30'
@@ -550,15 +557,15 @@ spec:
               path: .git-credentials
 
     initContainers:
-      - name: init1
+      - name: init0
         image: "{{workflow.parameters.git_image}}"
         imagePullPolicy: IfNotPresent
         mirrorVolumeMounts: true
         command: [/bin/sh, -c]
         args:
           - cd "{{inputs.parameters.package-path}}" &&
-            mkdir easiwf
-            cd easiwf
+            mkdir easiwf &&
+            cd easiwf &&
             git config --global credential.helper "store --file /secret/git/.git-credentials" &&
             git clone --depth 1 --branch main https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows
       - name: init1
@@ -575,7 +582,7 @@ spec:
 
     script:
       image: "{{workflow.parameters.dask_image}}"
-      imagePullPolicy: Always
+      imagePullPolicy: IfNotPresent
       env:
         - name: AWS_METADATA_SERVICE_TIMEOUT
           value: '30'
