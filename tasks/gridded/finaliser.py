@@ -79,8 +79,8 @@ class Assemble(ArgoTask):
             logger.setLevel(logging.ERROR)
 
         # Download data
-        bucket = self.input["bucket"]
-        prefix = str(Path(self.input['prefix']) / 'predict/RF')
+        bucket = self.output["bucket"]
+        prefix = str(Path(self.output['prefix']) / 'predict/RF')
         path = Path(self.temp_dir.name)
 
         self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {path}")
@@ -111,22 +111,16 @@ class Assemble(ArgoTask):
         product_data = xr.combine_by_coords(product_).compute()
 
         write_cog(mgs, fname = path / 'sam_mgs_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=np.nan, overwrite=True)
-        write_cog(dates_data, fname = path / 'sam_dates_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=np.nan, overwrite=True)
-        write_cog(bool_data, fname = path / 'sam_bool_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=np.nan, overwrite=True)
-        write_cog(product_data, fname = path / 'sam_products_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=np.nan, overwrite=True)
+        write_cog(dates_data, fname = path / 'sam_dates_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=0, overwrite=True)
+        write_cog(bool_data, fname = path / 'sam_bool_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=0, overwrite=True)
+        write_cog(product_data, fname = path / 'sam_products_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=0, overwrite=True)
 
         self._logger.info("Data downloaded and assembled")
         if self.output['upload']:
-            bucket = 'easido-prod-user-scratch' #self.input["bucket"]
-            prefix = 'AROAT2ES654NBY3M4X7WD:jhodge/samsara_final' #Path(self.input["prefix"])
-
             for file_path in path.glob("*.tif"):
                 if not file_path.is_file():
                     continue
                 key = str(Path(self.output['prefix']) / 'final' / file_path.relative_to(self.temp_dir.name))
-
-                bucket = 'easido-prod-user-scratch' #self.output["bucket"]
-                key = f'{prefix}/{file_path.name}' #Path(self.output["prefix"])
 
                 self._logger.info(f"    Uploading {file_path} to s3://{bucket}/{key}")
                 self.s3_upload_file(
@@ -185,7 +179,7 @@ class Assemble(ArgoTask):
         self.close_client()
 
         with open('/tmp/dates_idx', 'w') as outfile:
-            json.dump(list(range(0,len(test))),outfile)
+            json.dump(list(range(0,len(dates))),outfile)
 
         with open('/tmp/dates','w') as outfile:
             json.dump(dates, outfile)
@@ -228,8 +222,10 @@ class Finalise(ArgoTask):
 
         # dates = datetimes.dt.strftime("%Y-%m-%d").values
         dates = [["20160106", "20160107", "20160108", "20160114", "20160115", "20160116", "20160122", "20160123", "20160124", "20160130"]]
+
         dates_idx = self.dates_idx
-        dates = dates[dates_idx]
+        dates = dates[int(dates_idx)]
+        self.dates = dates
 
         for date in self.dates:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
@@ -240,8 +236,8 @@ class Finalise(ArgoTask):
             filename = "break000"
 
             # Download data
-            bucket = self.input["bucket"]
-            prefix = str(Path(self.input['prefix']) / 'predict' / 'final')
+            bucket = self.output["bucket"]
+            prefix = str(Path(self.output['prefix']) / 'predict' / 'final')
             path = Path(self.temp_dir.name)
 
             self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {path}")
@@ -290,7 +286,7 @@ class Finalise(ArgoTask):
                 fname = mpath / f"{date.strftime('%Y%m%d')}_{filename}"
                 
                 self._logger.info("Writing final data")
-                write_cog(combined_ds.mgs, fname=f'{fname}.tif', nodata=np.nan, overwrite=True)
+                write_cog(combined_ds.mgs, fname=f'{fname}_mag.tif', nodata=np.nan, overwrite=True)
                 write_cog(combined_ds.product, fname=f'{fname}_product.tif', nodata=np.nan, overwrite=True)
                 combined_ds.rio.to_raster(f'{fname}_multiband.tif',driver='COG')
                 samsara_prepare.prepare_samsara(fname.parent)
@@ -299,10 +295,9 @@ class Finalise(ArgoTask):
                     for file_path in out_path.rglob("*"):
                         if not file_path.is_file():
                             continue
-                        key = str(Path(self.output['prefix']) / file_path.relative_to(out_path))
+                        key = str(Path(self.output['final_prefix']) / file_path.relative_to(out_path))
 
-                        bucket = 'easido-prod-user-scratch' #self.output["bucket"]
-                        # key = f'{prefix}/{file_path.name}' #Path(self.output["prefix"])
+                        bucket = self.output["bucket"]
 
                         self._logger.info(f"    Uploading {file_path} to s3://{bucket}/{key}")
                         self.s3_upload_file(
@@ -310,3 +305,5 @@ class Finalise(ArgoTask):
                             bucket=bucket,
                             key=key,
                         )
+            else:
+                self._logger.info(f"{date} has no data, skipping")

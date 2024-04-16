@@ -545,7 +545,7 @@ class TileProcessor(ArgoTask):
                 products['product_num'] = xr.where(products.product=='landsat5_c2l2_sr',5,products.product_num)
                 
                 # Match the dates to find the satellite product for each pixel and get rid of any unnecessary dimensions and variables
-                sam_products = products.product_num.where(((products.time.astype(int)*1e-9).astype(int) == sam_dates)).max('time').squeeze().drop_vars('band')
+                sam_products = products.product_num.where(((products.time.astype(int)*1e-9) == sam_dates)).max('time').squeeze().astype('uint8').drop_vars('band')
 
                 nname = self.rf_params['rf_model'].split('.')[0]
                 write_cog(

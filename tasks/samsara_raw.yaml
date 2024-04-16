@@ -1,11 +1,11 @@
 ---
-name: samsara_new
-description: Samsara data
+name: samsara_raw
+description: Samsara raw data prior to categorisation by SMA
 metadata_type: eo3
 
 metadata:
   product:
-    name: samsara_new
+    name: samsara_raw
 
 # load:
 #   resolution: {x: 30, y: -30}
@@ -17,6 +17,11 @@ metadata:
 measurements:
   - name: "mag"
     aliases: [magnitude, MAG, change]
+    units: "1"
+    dtype: float32
+    nodata: NaN
+  - name: "product"
+    aliases: [satelite, satellite]
     units: "1"
     dtype: float32
     nodata: NaN

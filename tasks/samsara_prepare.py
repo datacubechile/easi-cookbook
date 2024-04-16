@@ -15,7 +15,7 @@ from easi_assemble import EasiPrepare
 UUID_NAMESPACE = uuid.UUID("e05aa9a6-dedb-405a-8146-53329bbb2a7a") 
 
 def prepare_samsara(dir):
-    product = 'samsara'
+    product = 'samsara_raw'
     # print(dir)
     f_dir = Path(dir)
     metadata_path = f_dir / 'odc-metadata.yaml'
@@ -28,7 +28,8 @@ def prepare_samsara(dir):
     
     files = {
         # 'bool':'clasified_bool_LC.tif',
-        'mag':next(f_dir.rglob('*_break000.tif'),None),
+        'mag':next(f_dir.rglob('*_break000_mag.tif'),None),
+        'product': next(f_dir.rglob('*_break000_product.tif'),None),
         # 'change':'clasified_ndvi-neg-change_LC.tif'
     }
 
@@ -36,13 +37,13 @@ def prepare_samsara(dir):
         ts = pd.to_datetime('today')
         with EasiPrepare(
             dataset_path=f_dir,
-            product_yaml=Path(__file__).parent / 'samsara.yaml' # This should be in hte same directory as this file
+            product_yaml=Path(__file__).parent / 'samsara_raw.yaml' # This should be in hte same directory as this file
         ) as p:
             dataset = Path(f_dir).name
             date = datetime(int(dataset[:4]),int(dataset[4:6]),int(dataset[6:8]),12) # Add 12 hours to make sure timezone mostly works
             ## IDs and Labels
             version = 'v04'
-            unique_name = f"{Path(files['mag']).stem}-{version}"  # Unique dataset name
+            unique_name = f"{Path(files['mag']).stem.replace('_mag','')}-{version}"  # Unique dataset name
             p.dataset_id = uuid.uuid5(UUID_NAMESPACE, unique_name)  # Unique dataset UUID
             unique_name_replace = re.sub('\.', '_', unique_name)
             p.label = f"{unique_name_replace}-{p.product_name}"  # Can not have '.' in label
