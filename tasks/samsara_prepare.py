@@ -8,7 +8,7 @@ import uuid
 import re
 import sys
 sys.path.insert(1,'/home/jovyan/CSIRO/easi-workflows/tasks/eo3assemble')
-sys.path.insert(1,'/opt/repo/easiwf/easi-woriflows/tasks/eo3assemble')
+sys.path.insert(1,'/opt/repo/easiwf/easi-workflows/tasks/eo3assemble')
 
 from easi_assemble import EasiPrepare
 

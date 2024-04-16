@@ -340,19 +340,11 @@ spec:
       - name: init0
         image: "{{workflow.parameters.git_image}}"
         imagePullPolicy: IfNotPresent
-        mirrorVolumeMounts: false
-        volumeMounts:
-          - name: git-sync
-            mountPath: "{{inputs.parameters.package-path}}"
-          # - name: git-secret
-          #   mountPath: "/secret/git"
+        mirrorVolumeMounts: true
         command: [/bin/sh, -c]
         args:
           - cd "{{inputs.parameters.package-path}}" &&
             git clone --depth 1 --branch "{{inputs.parameters.package-branch}}" "{{inputs.parameters.package-repo}}"
-          # - cd "{{inputs.parameters.package-path}}" &&
-          #   git config --global credential.helper "store --file /secret/git/.git-credentials" &&
-          #   git clone --depth 1 --branch "{{inputs.parameters.package-branch}}" "{{inputs.parameters.package-repo}}"
       - name: init1
         image: "{{workflow.parameters.git_image}}"
         imagePullPolicy: IfNotPresent
@@ -460,6 +452,14 @@ spec:
         image: "{{workflow.parameters.git_image}}"
         imagePullPolicy: IfNotPresent
         mirrorVolumeMounts: true
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            git clone --depth 1 --branch "{{inputs.parameters.package-branch}}" "{{inputs.parameters.package-repo}}"
+      - name: init1
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: true
         volumeMounts:
           - name: git-secret
             mountPath: "/secret/git"
@@ -470,15 +470,10 @@ spec:
             cd easiwf &&
             git config --global credential.helper "store --file /secret/git/.git-credentials" &&
             git clone --depth 1 --branch main https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows
-      - name: init1
+      - name: init2
         image: "{{workflow.parameters.git_image}}"
         imagePullPolicy: IfNotPresent
-        mirrorVolumeMounts: false
-        volumeMounts:
-          - name: git-sync
-            mountPath: "{{inputs.parameters.package-path}}"
-          - name: git-secret
-            mountPath: "/secret/git"
+        mirrorVolumeMounts: true
         command: [/bin/sh, -c]
         args:
           - cd "{{inputs.parameters.package-path}}" &&
@@ -512,25 +507,28 @@ spec:
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
-        package_path = "{{inputs.parameters.package-path}}"
-        package_repo = "{{inputs.parameters.package-repo}}"
-        repo = Path(package_path) / package_repo.split('/')[-1]
-        sys.path.insert(1, str(repo))
+        if __name__ == "__main__":
+          import time
+          time.sleep(3600)
+          import sys
+          import json
+          import logging
+          from pathlib import Path
 
-        logging.basicConfig(level=logging.INFO)
+          package_path = "{{inputs.parameters.package-path}}"
+          package_repo = "{{inputs.parameters.package-repo}}"
+          repo = Path(package_path) / package_repo.split('/')[-1]
+          sys.path.insert(1, str(repo))
 
-        # from tasks.gridded.finaliser import Assemble
+          logging.basicConfig(level=logging.INFO)
 
-        package_path        = "{{inputs.parameters.package-path}}"
-        package_repo        = "https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows"
-        
-        repo = Path(package_path) / 'easiwf' / package_repo.split('/')[-1] / 'tasks' / 'eo3assemble'
-        sys.path.insert(1, str(eo3assemble))
-        
+          from tasks.gridded.finaliser import Assemble
 
-
-        # assembler = Assemble(params_assembler)
-        # assembler.assemble()
+          package_path        = "{{inputs.parameters.package-path}}"
+          package_repo        = "https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows"
+          
+          assembler = Assemble({{inputs.parameters}})
+          assembler.assemble()
 
 ##--------------------------------
   - name: finaliser
@@ -612,22 +610,23 @@ spec:
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
-        package_path = "{{inputs.parameters.package-path}}"
-        package_repo = "{{inputs.parameters.package-repo}}"
-        repo = Path(package_path) / package_repo.split('/')[-1]
-        sys.path.insert(1, str(repo))
+        if __name__ == "__main__":
+          import sys
+          import json
+          import logging
+          from pathlib import Path
+          
+          package_path = "{{inputs.parameters.package-path}}"
+          package_repo = "{{inputs.parameters.package-repo}}"
+          repo = Path(package_path) / package_repo.split('/')[-1]
+          sys.path.insert(1, str(repo))
 
-        logging.basicConfig(level=logging.INFO)
-        from tasks.gridded.finaliser import Finalise
-
-        package_path        = "{{inputs.parameters.package-path}}"
-        package_repo        = "https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows"
-        
-        repo = Path(package_path) / 'easiwf' / package_repo.split('/')[-1] / 'tasks' / 'eo3assemble'
-        sys.path.insert(1, str(eo3assemble))
-        
-        finaliser = Finalise(params_finaliser)
-        finaliser.finalise()
+          logging.basicConfig(level=logging.INFO)
+          
+          from tasks.gridded.finaliser import Finalise
+          
+          finaliser = Finalise({{inputs.parameters}})
+          finaliser.finalise()
 
 
       
