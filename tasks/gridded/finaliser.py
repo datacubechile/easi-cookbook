@@ -186,6 +186,7 @@ class Assemble(ArgoTask):
 
         with open('/tmp/way', 'w') as outfile:
             outfile.write([f.name for f in os.scandir(path) if f.is_dir()][0])
+            
         return ds, sam_timestamps
 
 class Finalise(ArgoTask):
