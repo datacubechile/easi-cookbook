@@ -539,13 +539,13 @@ class TileProcessor(ArgoTask):
                 # Put the product list into its own dataset
                 products=ds_product.to_dataset(name='product')
                 # Add simple integer product numbering
-                products['product_num'] = xr.where(products.product=='landsat9_c2l2_sr',9,np.nan)
+                products['product_num'] = xr.where(products.product=='landsat9_c2l2_sr',9,np.nan).astype('float32')
                 products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',8,products.product_num)
                 products['product_num'] = xr.where(products.product=='landsat7_c2l2_sr',7,products.product_num)
                 products['product_num'] = xr.where(products.product=='landsat5_c2l2_sr',5,products.product_num)
                 
                 # Match the dates to find the satellite product for each pixel and get rid of any unnecessary dimensions and variables
-                sam_products = products.product_num.where(((products.time.astype(int)*1e-9) == sam_dates)).max('time').squeeze().astype('uint8').drop_vars('band')
+                sam_products = products.product_num.where(((products.time.astype(int)*1e-9).astype(int) == sam_dates)).max('time').squeeze().astype('float32')
 
                 nname = self.rf_params['rf_model'].split('.')[0]
                 write_cog(

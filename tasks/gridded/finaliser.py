@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import json
 import logging
 import pickle
@@ -110,10 +111,17 @@ class Assemble(ArgoTask):
         product_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
         product_data = xr.combine_by_coords(product_).compute()
 
-        write_cog(mgs, fname = path / 'sam_mgs_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=np.nan, overwrite=True)
-        write_cog(dates_data, fname = path / 'sam_dates_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=0, overwrite=True)
-        write_cog(bool_data, fname = path / 'sam_bool_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=0, overwrite=True)
-        write_cog(product_data, fname = path / 'sam_products_RF_v03_all-trained_negative_of_first_last_negative.tif', nodata=0, overwrite=True)
+        #sam_bool_RF_v04_all-trained_negative_of_first_last_negative_S203E017.tif
+
+        PATTERN = re.compile('^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
+        match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
+        filespec = match['filespec']
+        # filespec = 'all-trained_negative_of_first_last_negative'
+
+        write_cog(mgs, fname = path / f'sam_mgs_{filespec}.tif', nodata=np.nan, overwrite=True)
+        write_cog(dates_data, fname = path / f'sam_dates_{filespec}.tif', nodata=0, overwrite=True)
+        write_cog(bool_data, fname = path / f'sam_bool_{filespec}.tif', nodata=0, overwrite=True)
+        write_cog(product_data, fname = path / f'sam_products_{filespec}.tif', nodata=0, overwrite=True)
 
         self._logger.info("Data downloaded and assembled")
         if self.output['upload']:
@@ -216,10 +224,6 @@ class Finalise(ArgoTask):
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
             self._logger.info(f"Processing {date}")
 
-            way = self.way
-            out_path = Path(self.temp_dir.name) / "dcc_format" / "v04" / way
-            filename = "break000"
-
             # Download data
             bucket = self.output["bucket"]
             prefix = str(Path(self.output['prefix']) / 'final')
@@ -253,6 +257,13 @@ class Finalise(ArgoTask):
             product_data = xr.combine_by_coords(product_).compute()
 
             attrs = {'crs': 'epsg:32619', 'grid_mapping': 'spatial_ref'}
+
+            PATTERN = re.compile('^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
+            match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
+            rf_version = match['rf_version']
+
+            out_path = Path(self.temp_dir.name) / "dcc_format" / rf_version / self.way
+            filename = "break000"
 
             # TODO: CHANGE TO DAY - should write out days not timestamps
             data_mgs = xr.where(sam_dates.dt.date == date, mgs, np.nan)
