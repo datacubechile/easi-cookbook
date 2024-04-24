@@ -22,6 +22,7 @@ from dask.distributed import Client, LocalCluster
 from datacube import Datacube
 from datacube.api import GridWorkflow
 from datacube.utils.masking import make_mask, mask_invalid_data
+from odc.algo import to_f32, mask_cleanup
 from eodatasets3 import DatasetPrepare
 from tasks.argo_task import ArgoTask
 from datacube.utils.rio import configure_s3_access
@@ -96,6 +97,8 @@ class Assemble(ArgoTask):
         sam_dates = path.rglob('sam_dates*.tif')
         sam_mgs = path.rglob('sam_mgs*.tif')
         sam_prod = path.rglob('sam_products*.tif')
+        sam_post_prod = path.rglob('sam_post_products*.tif')
+        sam_post_dates = path.rglob('sam_post_dates*.tif')
 
         # Merge into data arrays
         mgs_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
@@ -111,32 +114,13 @@ class Assemble(ArgoTask):
         product_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
         product_data = xr.combine_by_coords(product_).compute()
 
-        #sam_bool_RF_v04_all-trained_negative_of_first_last_negative_S203E017.tif
+        post_prod_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
+        post_product_data = xr.combine_by_coords(post_prod_).compute()
 
-        PATTERN = re.compile('^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
-        match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
-        filespec = match['filespec']
-        # filespec = 'all-trained_negative_of_first_last_negative'
-
-        write_cog(mgs, fname = path / f'sam_mgs_{filespec}.tif', nodata=np.nan, overwrite=True)
-        write_cog(dates_data, fname = path / f'sam_dates_{filespec}.tif', nodata=0, overwrite=True)
-        write_cog(bool_data, fname = path / f'sam_bool_{filespec}.tif', nodata=0, overwrite=True)
-        write_cog(product_data, fname = path / f'sam_products_{filespec}.tif', nodata=0, overwrite=True)
+        post_dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
+        post_dates_data = xr.combine_by_coords(post_dates_).compute()
 
         self._logger.info("Data downloaded and assembled")
-        if self.output['upload']:
-            for file_path in path.glob("*.tif"):
-                if not file_path.is_file():
-                    continue
-                key = str(Path(self.output['prefix']) / 'final' / file_path.relative_to(self.temp_dir.name))
-
-                self._logger.info(f"    Uploading {file_path} to s3://{bucket}/{key}")
-                self.s3_upload_file(
-                    path=str(file_path),
-                    bucket=bucket,
-                    key=key,
-                )
-            self._logger.info("Completed upload of assembled data")
 
         self._logger.debug("Initialising local dask cluster")
         self.start_client()
@@ -151,14 +135,14 @@ class Assemble(ArgoTask):
             "crs": self.odc_query['output_crs'],
             "output_crs": self.odc_query['output_crs'],
             "resolution": self.odc_query['resolution'],
-            "group_by": self.odc_query['group_by'],
+            # "group_by": self.odc_query['group_by'],
             "dask_chunks": {'time':1}
         }
 
         products = self.product
 
         data = []
-        
+
         for product in products:
             ds_ = dc.load(
                 product=product,
@@ -170,12 +154,13 @@ class Assemble(ArgoTask):
         ds = ds.chunk({'time':1,'x':2000,'y':2000})
         ds = ds.sortby('time')
         self._logger.info(f"{ds.time.count().values.item()} available landsat dates loaded from data cube")
-        
+
+        # Prepare list of primary landsat dates
         datetimes = ds.time.where(ds.time.dt.year >= datetime.datetime.fromtimestamp(sam_timestamps.min().values.item()).year,drop=True)
-        # TODO: EXPORT DAYS, NOT TIMESTAMPS
+
         dates = list(set(datetimes.dt.strftime('%Y%m%d').values))
         dates.sort()
-        # timestamps = (datetimes.astype(int)*1e-09).astype(int)
+
         def chunks(lst, n):
             """Yield successive n-sized chunks from lst."""
             for i in range(0, len(lst), n):
@@ -185,6 +170,33 @@ class Assemble(ArgoTask):
 
         self._logger.debug("Closing local dask cluster")
         self.close_client()
+
+        # Prepare geotiffs for output
+        PATTERN = re.compile('^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
+        match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
+        filespec = match['filespec']
+        # filespec = 'all-trained_negative_of_first_last_negative'
+
+        write_cog(mgs, fname = path / f'sam_mgs_{filespec}.tif', nodata=np.nan, overwrite=True)
+        write_cog(dates_data, fname = path / f'sam_dates_{filespec}.tif', nodata=0, overwrite=True)
+        write_cog(bool_data, fname = path / f'sam_bool_{filespec}.tif', nodata=0, overwrite=True)
+        write_cog(product_data, fname = path / f'sam_products_{filespec}.tif', nodata=0, overwrite=True)
+        write_cog(post_product_data, fname = path / f'sam_post_products_{filespec}.tif', nodata=0, overwrite=True)
+        write_cog(post_dates_data, fname = path / f'sam_post_dates_{filespec}.tif', nodata=0, overwrite=True)
+        
+        if self.output['upload']:
+            for file_path in path.glob("*.tif"):
+                if not file_path.is_file():
+                    continue
+                key = str(Path(self.output['prefix']) / 'final' / file_path.relative_to(self.temp_dir.name))
+
+                self._logger.info(f"    Uploading {file_path} to s3://{bucket}/{key}")
+                self.s3_upload_file(
+                    path=str(file_path),
+                    bucket=bucket,
+                    key=key,
+                )
+            self._logger.info("Completed upload of assembled data")
 
         with open('/tmp/dates_idx', 'w') as outfile:
             json.dump(list(range(0,len(dates))),outfile)
@@ -241,6 +253,8 @@ class Finalise(ArgoTask):
             sam_dates = path.rglob('sam_dates*.tif')
             sam_mgs = path.rglob('sam_mgs*.tif')
             sam_prod = path.rglob('sam_products*.tif')
+            sam_post_prod = path.rglob('sam_post_products*.tif')
+            sam_post_dates = path.rglob('sam_post_dates*.tif')
 
             mgs_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
             mgs = xr.combine_by_coords(mgs_).compute()
@@ -255,6 +269,12 @@ class Finalise(ArgoTask):
 
             product_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
             product_data = xr.combine_by_coords(product_).compute()
+
+            post_prod_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
+            post_product_data = xr.combine_by_coords(post_prod_).compute()
+
+            post_dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
+            post_dates_data = xr.combine_by_coords(post_dates_).compute()
 
             attrs = {'crs': 'epsg:32619', 'grid_mapping': 'spatial_ref'}
 
@@ -275,15 +295,21 @@ class Finalise(ArgoTask):
                 mpath.mkdir(parents=True, exist_ok=True)
 
                 combined_ds = data_mgs.to_dataset(name='mgs')
+
                 combined_ds['product'] = xr.where(sam_dates.dt.date == date, product_data, np.nan).astype('float32')
-                combined_ds.product.attrs = attrs
-                combined_ds.product.rio.write_nodata(np.nan, inplace=True)
+                combined_ds['product_post'] = xr.where(sam_dates.dt.date == date, post_product_data, np.nan).astype('float32')
+                combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, np.nan).astype('float32')
+                for var in combined_ds.data_vars:
+                    combined_ds[var].attrs = attrs
+                    combined_ds[var].rio.write_nodata(np.nan, inplace=True)
 
                 fname = mpath / f"{date.strftime('%Y%m%d')}_{filename}"
                 
                 self._logger.info("Writing final data")
                 write_cog(combined_ds.mgs, fname=f'{fname}_mag.tif', nodata=np.nan, overwrite=True)
                 write_cog(combined_ds.product, fname=f'{fname}_product.tif', nodata=np.nan, overwrite=True)
+                write_cog(combined_ds.product_post, fname=f'{fname}_product_post.tif', nodata=np.nan, overwrite=True)
+                write_cog(combined_ds.date_post, fname=f'{fname}_date_post.tif', nodata=np.nan, overwrite=True)
                 combined_ds.rio.to_raster(f'{fname}_multiband.tif',driver='COG')
                 samsara_prepare.prepare_samsara(fname.parent)
 

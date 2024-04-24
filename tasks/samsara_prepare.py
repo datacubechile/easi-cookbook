@@ -28,8 +28,10 @@ def prepare_samsara(dir):
     
     files = {
         # 'bool':'clasified_bool_LC.tif',
-        'mag':next(f_dir.rglob('*_break000_mag.tif'),None),
-        'product': next(f_dir.rglob('*_break000_product.tif'),None),
+        'mag':next(f_dir.rglob('*_mag.tif'),None),
+        'product': next(f_dir.rglob('*_product.tif'),None),
+        'product_post': next(f_dir.rglob('*_product_post.tif'),None),
+        'date_post': next(f_dir.rglob('*_date_post.tif'),None),
         # 'change':'clasified_ndvi-neg-change_LC.tif'
     }
 

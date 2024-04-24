@@ -25,6 +25,15 @@ measurements:
     units: "1"
     dtype: float32
     nodata: NaN
+  - name: "product_post"
+    aliases: [satelite_post, satellite_post]
+    units: "1"
+    dtype: float32
+    nodata: NaN
+  - name: "date_post"
+    units: "1"
+    dtype: float32
+    nodata: NaN
   
   # - name: "dates"
   #   aliases: [DATES, date, DATE, dt, DT]

@@ -16,21 +16,10 @@ class TileGenerator(ArgoTask):
     FILEPATH_CELLS = "/tmp/product_cells.pickle"
     """Output path for the gridded cells."""
 
-    DEFAULT_ODC_QUERY = {
-        "output_crs": "EPSG:3577",
-        "resolution": [-30, 30],
-        "group_by": "solar_day",
-    }
-    """Default ODC parameters, if the user doesn't specify them."""
-
     def __init__(self, input_params: [{str, str}]) -> None:
         """Check and cast input params as required."""
         super().__init__(input_params)
         self.size = float(self.size)  # Tile size in CRS units
-        # Start from default values and update with whatever the user has set
-        query = self.DEFAULT_ODC_QUERY.copy()
-        query.update(self.odc_query)
-        self.odc_query = query
 
     def generate_tiles(self) -> None:
         """Build a set of cells based on a grid workflow for the selected product.

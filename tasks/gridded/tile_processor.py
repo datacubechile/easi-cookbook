@@ -2,6 +2,7 @@
 Example of geomedian calculation for a tile, using a local dask cluster.
 """
 import sys
+import re
 import logging
 import pickle
 import math
@@ -45,20 +46,6 @@ logging.getLogger("rasterio").setLevel(logging.ERROR)
 logging.getLogger('botocore').setLevel(logging.WARNING)
 
 class TileProcessor(ArgoTask):
-    PRODUCT = "landsat8_geomedian_monthly"
-    """ODC product name being generated."""
-
-    PRODUCT_TEMPLATE = "{product}_{yref}{xref}_{year:04}{month:02}"
-    """File name template."""
-
-    SCALE = 0.0000275
-    """Scale to apply to GA-stored USGS data to bring it back to [0.0, 1.0]."""
-
-    ONE_MONTH = pd.DateOffset(months=1)
-    """A one month time delta."""
-
-    ONE_DAY = pd.DateOffset(days=1)
-    """A one day time delta."""
 
     def __init__(self, input_params: [{str, str}]) -> None:
         """Check and cast input params as required.
@@ -143,7 +130,7 @@ class TileProcessor(ArgoTask):
                 "time":(self.roi["time_start"], self.roi["time_end"]),
                 "like":cell.geobox,
                 "dask_chunks":{"time":4},
-                "group_by":"solar_day"
+                # "group_by":"solar_day"
             }
 
             chunks = {'x':int(self.pelt_params['processing_chunk_size']), 'y':int(self.pelt_params['processing_chunk_size']), 'time':-1}
@@ -575,6 +562,60 @@ class TileProcessor(ArgoTask):
                 write_cog(
                     geo_im = sam_products,
                     fname = rf_out / f"sam_products_{nname}_{way}_{cellref}.tif",
+                    overwrite = True,
+                    nodata = 0,
+                    compress='LZW'
+                )
+
+                dataset_trimmed = dataset.isel(x=slice(pad,-pad),y=slice(pad,-pad)).ndvi.compute()
+
+                # Get the dates of the changes
+                change_dates = sam_dates.where(sam_dates != 0)
+                # Save current timestamp
+                now_ts = datetime.datetime.timestamp(datetime.datetime.now())
+                # Get the last change date
+                ts = change_dates.max().values.item()
+                
+                # Create an empty Dataset with the same shape as the input data
+                post_break = xr.full_like(dataset_trimmed.isel(time=0),fill_value=int(now_ts),dtype=int)
+                post_break = post_break.rename('ts').drop('time')
+                post_break = post_break.to_dataset()
+                post_break['product'] = xr.full_like(dataset_trimmed.isel(time=0),fill_value=0,dtype=int)
+
+                # Loop through the dates in reverse order to find the first good pixel which is more recent than the change date
+                for dt in dataset_trimmed.time.values[::-1]:    
+                    t = (dt.astype(int)*1e-09).astype(int)
+                    temp_ = xr.where((~dataset_trimmed.sel(time=dt).isnull()) & (t>change_dates),t,post_break.ts)
+                    post_break['ts'] = xr.where(temp_ < post_break.ts,temp_,post_break.ts)
+                
+                # Clean up the data to replace the now_ts value with 0
+                post_break = xr.where(post_break==int(now_ts),0,post_break)
+
+                # Get a list of all the unique timestamps
+                timestamps=np.unique(post_break.ts.values.flatten())
+                timestamps=timestamps[timestamps!=0]
+
+                # Loop through the new timestamps and find the product for each pixel
+                for t in timestamps:
+                    dt = datetime.datetime.fromtimestamp(t).isoformat()
+                    p = products.product_num.sel(time=dt).min().values.item()
+                    # product_num = np.int8(re.compile('^landsat(\d{1})_c2l2_sr$').match(p).group(1))
+                    post_break['product'] = xr.where(post_break.ts==t,p,post_break.product).astype('float32')
+                
+                # Clean up the data by removing zeros
+                post_break=post_break.where(post_break!=0).astype('float32')
+
+                write_cog(
+                    geo_im = post_break.ts,
+                    fname = rf_out / f"sam_post_dates_{nname}_{way}_{cellref}.tif",
+                    overwrite = True,
+                    nodata = 0,
+                    compress='LZW'
+                )
+
+                write_cog(
+                    geo_im = post_break.product,
+                    fname = rf_out / f"sam_post_products_{nname}_{way}_{cellref}.tif",
                     overwrite = True,
                     nodata = 0,
                     compress='LZW'
