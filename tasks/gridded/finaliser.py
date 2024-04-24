@@ -135,7 +135,7 @@ class Assemble(ArgoTask):
             "crs": self.odc_query['output_crs'],
             "output_crs": self.odc_query['output_crs'],
             "resolution": self.odc_query['resolution'],
-            # "group_by": self.odc_query['group_by'],
+            "group_by": self.odc_query['group_by'],
             "dask_chunks": {'time':1}
         }
 
