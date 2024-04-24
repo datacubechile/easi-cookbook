@@ -130,7 +130,7 @@ class TileProcessor(ArgoTask):
                 "time":(self.roi["time_start"], self.roi["time_end"]),
                 "like":cell.geobox,
                 "dask_chunks":{"time":4},
-                # "group_by":"solar_day"
+                "group_by":"solar_day"
             }
 
             chunks = {'x':int(self.pelt_params['processing_chunk_size']), 'y':int(self.pelt_params['processing_chunk_size']), 'time':-1}
