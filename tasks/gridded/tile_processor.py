@@ -605,6 +605,9 @@ class TileProcessor(ArgoTask):
                 # Clean up the data by removing zeros
                 post_break=post_break.where(post_break!=0).astype('float32')
 
+                for var in post_break.variables:
+                    post_break[var].attrs = dataset.attrs
+
                 write_cog(
                     geo_im = post_break.ts,
                     fname = rf_out / f"sam_post_dates_{nname}_{way}_{cellref}.tif",
