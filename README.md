@@ -40,7 +40,7 @@ Job tiling with ODC code
 Group work into batches each of which is run by a single Argo worker.
 
 - Can control the number of simultaneous Argo workers
-- If an Argo worker dies then the batch will be restarted. In this case ensure yor code can skip work that was previously done.
+- If an Argo worker dies then the batch will be restarted. In this case ensure your code can skip work that was previously done.
 - Each Argo worker can itself launch a dask cluster and a grid workflow, or any complex processing task.
 
 ## Contributing
