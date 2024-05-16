@@ -416,7 +416,6 @@ class Finalise(ArgoTask):
                             bucket=bucket,
                             key=key,
                         )
-                break
             else:
                 self._logger.info(f"{date} has no data, skipping")
                 
