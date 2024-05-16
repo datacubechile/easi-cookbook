@@ -8,6 +8,7 @@ metadata:
   labels:
     name: easi-workflows-gridded
     owner: jhodge
+    team: SAMSARA
 
 spec:
   serviceAccountName: data-pipelines-default # TODO Replace with values suitable for your deployment environment.
