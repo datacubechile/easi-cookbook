@@ -1,5 +1,6 @@
 import os
 import sys
+import gc
 import re
 import json
 import logging
@@ -295,6 +296,9 @@ class Finalise(ArgoTask):
             self.dates = json.load(f)
 
     def finalise(self) -> None:
+        # Clean up memory before starting
+        gc.collect()
+
         for date in self.dates[int(self.dates_idx)]:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
             self._logger.info(f"Processing {date}")
@@ -318,34 +322,35 @@ class Finalise(ArgoTask):
             sam_prod = path.rglob('sam_products*.tif')
             sam_post_prod = path.rglob('sam_post_products*.tif')
             sam_post_dates = path.rglob('sam_post_dates*.tif')
-            sam_rep_1d = path.rglob('sam_rep_1d*.tif')
-            sam_rep_60d = path.rglob('sam_rep_60d*.tif')
+            sam_rep_1d = path.rglob('sam_rep_1d_*.tif')
+            sam_rep_60d = path.rglob('sam_rep_60d_*.tif')
 
-            mgs_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
-            mgs = xr.combine_by_coords(mgs_).compute()
+            mgs = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
+            mgs = xr.combine_by_coords(mgs).compute()
 
-            dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_dates]
-            dates_data = xr.combine_by_coords(dates_).compute()
+            dates_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_dates]
+            dates_data = xr.combine_by_coords(dates_data).compute()
             sam_timestamps = dates_data.where(dates_data != 0)
+            del dates_data
             sam_dates = xr.DataArray(pd.to_datetime(sam_timestamps, unit='s').values,dims=['y','x'])
 
-            bool_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
-            bool_data = xr.combine_by_coords(bool_).compute()
+            bool_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
+            bool_data = xr.combine_by_coords(bool_data).compute()
 
-            product_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
-            product_data = xr.combine_by_coords(product_).compute()
+            product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
+            product_data = xr.combine_by_coords(product_data).compute()
 
-            post_prod_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
-            post_product_data = xr.combine_by_coords(post_prod_).compute()
+            post_product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
+            post_product_data = xr.combine_by_coords(post_product_data).compute()
 
-            post_dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
-            post_dates_data = xr.combine_by_coords(post_dates_).compute()
+            post_dates_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
+            post_dates_data = xr.combine_by_coords(post_dates_data).compute()
 
-            rep_1d_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_1d]
-            rep_1d_data = xr.combine_by_coords(rep_1d_).compute()
+            rep_1d_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_1d]
+            rep_1d_data = xr.combine_by_coords(rep_1d_data).compute()
 
-            rep_60d_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_60d]
-            rep_60d_data = xr.combine_by_coords(rep_60d_).compute()
+            rep_60d_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_60d]
+            rep_60d_data = xr.combine_by_coords(rep_60d_data).compute()
 
             attrs = {'crs': 'epsg:32619', 'grid_mapping': 'spatial_ref'}
 
@@ -377,7 +382,16 @@ class Finalise(ArgoTask):
                     combined_ds[var].rio.write_nodata(np.nan, inplace=True)
 
                 fname = mpath / f"{date.strftime('%Y%m%d')}_{filename}"
-                
+
+                del data_mgs
+                del mgs
+                del product_data
+                del post_product_data
+                del post_dates_data
+                del rep_1d_data
+                del rep_60d_data
+                gc.collect()
+
                 self._logger.info("Writing final data")
                 write_cog(combined_ds.mgs, fname=f'{fname}_mag.tif', nodata=np.nan, overwrite=True)
                 write_cog(combined_ds.product, fname=f'{fname}_product.tif', nodata=np.nan, overwrite=True)
@@ -402,5 +416,7 @@ class Finalise(ArgoTask):
                             bucket=bucket,
                             key=key,
                         )
+                break
             else:
                 self._logger.info(f"{date} has no data, skipping")
+                
