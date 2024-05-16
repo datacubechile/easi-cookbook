@@ -32,6 +32,8 @@ def prepare_samsara(dir):
         'product': next(f_dir.rglob('*_product.tif'),None),
         'product_post': next(f_dir.rglob('*_product_post.tif'),None),
         'date_post': next(f_dir.rglob('*_date_post.tif'),None),
+        'rep_1d': next(f_dir.rglob('*_rep_1d.tif'),None),
+        'rep_60d': next(f_dir.rglob('*_rep_60d.tif'),None),
         # 'change':'clasified_ndvi-neg-change_LC.tif'
     }
 
