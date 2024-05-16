@@ -16,7 +16,7 @@ metadata:
 
 measurements:
   - name: "mag"
-    aliases: [magnitude, MAG, change]
+    aliases: [magnitude, magnitud, MAG, change]
     units: "1"
     dtype: float32
     nodata: NaN
@@ -31,6 +31,17 @@ measurements:
     dtype: float32
     nodata: NaN
   - name: "date_post"
+    aliases: [fecha_post]
+    units: "1"
+    dtype: float32
+    nodata: NaN
+  - name: "rep_1d"
+    aliases: [repeticiones_1d]
+    units: "1"
+    dtype: float32
+    nodata: NaN
+  - name: "rep_60d"
+    aliases: [repeticiones_60d]
     units: "1"
     dtype: float32
     nodata: NaN

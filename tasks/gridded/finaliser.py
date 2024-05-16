@@ -19,6 +19,7 @@ import pandas as pd
 import rioxarray
 import xarray as xr
 from dask.distributed import Client, LocalCluster
+import dask.array as da
 from datacube import Datacube
 from datacube.api import GridWorkflow
 from datacube.utils.masking import make_mask, mask_invalid_data
@@ -93,32 +94,48 @@ class Assemble(ArgoTask):
         )
 
         # Get all the files
-        sam_bool = path.rglob('sam_bool*.tif')
-        sam_dates = path.rglob('sam_dates*.tif')
-        sam_mgs = path.rglob('sam_mgs*.tif')
-        sam_prod = path.rglob('sam_products*.tif')
-        sam_post_prod = path.rglob('sam_post_products*.tif')
-        sam_post_dates = path.rglob('sam_post_dates*.tif')
+        # sam_bool = path.rglob('sam_bool*.tif')
+        # sam_dates = path.rglob('sam_dates*.tif')
+        # sam_mgs = path.rglob('sam_mgs*.tif')
+        # sam_prod = path.rglob('sam_products*.tif')
+        # sam_post_prod = path.rglob('sam_post_products*.tif')
+        # sam_post_dates = path.rglob('sam_post_dates*.tif')
+
+        sam_bool_path = path / '*/*/sam_bool*.tif'
+        sam_dates_path = path / '*/*/sam_dates*.tif'
+        sam_mgs_path = path / '*/*/sam_mgs*.tif'
+        sam_prod_path = path / '*/*/sam_products*.tif'
+        sam_post_prod_path = path / '*/*/sam_post_products*.tif'
+        sam_post_dates_path = path / '*/*/sam_post_dates*.tif'
 
         # Merge into data arrays
-        mgs_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
-        mgs = xr.combine_by_coords(mgs_).compute()
+        # mgs_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
+        # mgs = xr.combine_by_coords(mgs_).compute()
 
-        dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_dates]
-        dates_data = xr.combine_by_coords(dates_).compute()
+        # dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_dates]
+        # dates_data = xr.combine_by_coords(dates_).compute()
+        # sam_timestamps = dates_data.where(dates_data != 0)
+
+        # bool_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
+        # bool_data = xr.combine_by_coords(bool_).compute()
+
+        # product_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
+        # product_data = xr.combine_by_coords(product_).compute()
+
+        # post_prod_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
+        # post_product_data = xr.combine_by_coords(post_prod_).compute()
+
+        # post_dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
+        # post_dates_data = xr.combine_by_coords(post_dates_).compute()
+
+        mgs = xr.open_mfdataset(str(sam_mgs_path), parallel=True).squeeze(drop=True).rename({'band_data':'mgs'}).mgs
+        dates_data = xr.open_mfdataset(str(sam_dates_path), parallel=True).squeeze(drop=True).rename({'band_data':'dates'}).dates
+        bool_data = xr.open_mfdataset(str(sam_bool_path), parallel=True).squeeze(drop=True).rename({'band_data':'bool'}).bool
+        product_data = xr.open_mfdataset(str(sam_prod_path), parallel=True).squeeze(drop=True).rename({'band_data':'product'}).product
+        post_product_data = xr.open_mfdataset(str(sam_post_prod_path), parallel=True).squeeze(drop=True).rename({'band_data':'post_product'}).post_product
+        post_dates_data = xr.open_mfdataset(str(sam_post_dates_path), parallel=True).squeeze(drop=True).rename({'band_data':'post_dates'}).post_dates
+
         sam_timestamps = dates_data.where(dates_data != 0)
-
-        bool_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
-        bool_data = xr.combine_by_coords(bool_).compute()
-
-        product_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
-        product_data = xr.combine_by_coords(product_).compute()
-
-        post_prod_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
-        post_product_data = xr.combine_by_coords(post_prod_).compute()
-
-        post_dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
-        post_dates_data = xr.combine_by_coords(post_dates_).compute()
 
         self._logger.info("Data downloaded and assembled")
 
@@ -169,6 +186,50 @@ class Assemble(ArgoTask):
         dates = list(chunks(dates,10))
 
         self._logger.debug("Closing local dask cluster")
+        
+        
+        # Function to count neighbours based on a rolling window and a given number of days
+        def count_neighbours(data,days=1):
+            # Remove zero values and convert to integer
+            tmp_ = da.where(data > 0, data, 0).astype(int)
+            
+            # Retrieve the middle pixel values and keep a compatible array shape
+            centroid_ = np.take(tmp_,[2],axis=2)
+            centroid_ = np.take(centroid_,[2],axis=3)
+            
+            # Round unix timestamps to "days"
+            seconds_per_day = 60*60*24
+            centroid_ = centroid_ - (centroid_ % seconds_per_day)
+            
+            # Add 1 second less than a full day to result in times of 23:59:59 to ensure correct date 
+            centroid_ = da.where(centroid_!=0, centroid_ + (seconds_per_day-1), 0)
+            # Get the target previous date value
+            centroid_previous_ = da.where(centroid_!=0,centroid_ - (days * seconds_per_day),0,)
+            
+            # Count the number of non-zero values within the spatial and temporal window
+            res = da.count_nonzero(((tmp_>centroid_previous_) & (tmp_<=centroid_)),axis=(2,3))
+            
+            # Convert to back xarray
+            arr = xr.zeros_like(dates_data)
+            arr.data = res
+            # res = xr.DataArray(res,dims=['y','x'],coords=sam_ts.coords).astype('int32')
+            
+            # Filter to original change pixels and compute
+            arr = arr.where(sam_ts!=0).compute()
+            return arr
+
+        # Configure rolling window - currently 5 x 5 pixels
+        # This has to be an odd number so that we can get the central pixel
+        self._logger.info("Counting repetitions")
+        # sam_timestamps = sam_timestamps.chunk({'x':2000,'y':2000})
+
+        sam_ts = xr.where(sam_timestamps.isnull(), 0, sam_timestamps.astype('int32'))
+
+        rolling = sam_ts.rolling(y=5,x=5,min_periods=1,center=True).construct(y='y_window',x='x_window')
+        
+        rep_1d = count_neighbours(rolling,days=1).where(sam_ts!=0) - 1 # Don't count the central pixel
+        rep_60d = count_neighbours(rolling,days=60).where(sam_ts!=0) - 1 # Don't count the central pixel
+        rep_60d = rep_60d-rep_1d
         self.close_client()
 
         # Prepare geotiffs for output
@@ -176,13 +237,15 @@ class Assemble(ArgoTask):
         match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
         filespec = match['filespec']
         # filespec = 'all-trained_negative_of_first_last_negative'
-
-        write_cog(mgs, fname = path / f'sam_mgs_{filespec}.tif', nodata=np.nan, overwrite=True)
-        write_cog(dates_data, fname = path / f'sam_dates_{filespec}.tif', nodata=0, overwrite=True)
-        write_cog(bool_data, fname = path / f'sam_bool_{filespec}.tif', nodata=0, overwrite=True)
-        write_cog(product_data, fname = path / f'sam_products_{filespec}.tif', nodata=0, overwrite=True)
-        write_cog(post_product_data, fname = path / f'sam_post_products_{filespec}.tif', nodata=0, overwrite=True)
-        write_cog(post_dates_data, fname = path / f'sam_post_dates_{filespec}.tif', nodata=0, overwrite=True)
+        self._logger.info(f"Writing output geotiffs for {filespec}")
+        write_cog(mgs, fname = path / f'sam_mgs_{filespec}.tif', nodata=np.nan, overwrite=True).compute()
+        write_cog(dates_data, fname = path / f'sam_dates_{filespec}.tif', nodata=0, overwrite=True).compute()
+        write_cog(bool_data, fname = path / f'sam_bool_{filespec}.tif', nodata=0, overwrite=True).compute()
+        write_cog(product_data, fname = path / f'sam_products_{filespec}.tif', nodata=0, overwrite=True).compute()
+        write_cog(post_product_data, fname = path / f'sam_post_products_{filespec}.tif', nodata=0, overwrite=True).compute()
+        write_cog(post_dates_data, fname = path / f'sam_post_dates_{filespec}.tif', nodata=0, overwrite=True).compute()
+        write_cog(rep_1d, fname = path / f'sam_rep_1d_{filespec}.tif', nodata=np.nan, overwrite=True).compute()
+        write_cog(rep_60d, fname = path / f'sam_rep_60d_{filespec}.tif', nodata=np.nan, overwrite=True).compute()
         
         if self.output['upload']:
             for file_path in path.glob("*.tif"):
@@ -255,6 +318,8 @@ class Finalise(ArgoTask):
             sam_prod = path.rglob('sam_products*.tif')
             sam_post_prod = path.rglob('sam_post_products*.tif')
             sam_post_dates = path.rglob('sam_post_dates*.tif')
+            sam_rep_1d = path.rglob('sam_rep_1d*.tif')
+            sam_rep_60d = path.rglob('sam_rep_60d*.tif')
 
             mgs_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
             mgs = xr.combine_by_coords(mgs_).compute()
@@ -275,6 +340,12 @@ class Finalise(ArgoTask):
 
             post_dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
             post_dates_data = xr.combine_by_coords(post_dates_).compute()
+
+            rep_1d_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_1d]
+            rep_1d_data = xr.combine_by_coords(rep_1d_).compute()
+
+            rep_60d_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_60d]
+            rep_60d_data = xr.combine_by_coords(rep_60d_).compute()
 
             attrs = {'crs': 'epsg:32619', 'grid_mapping': 'spatial_ref'}
 
@@ -299,6 +370,8 @@ class Finalise(ArgoTask):
                 combined_ds['product'] = xr.where(sam_dates.dt.date == date, product_data, np.nan).astype('float32')
                 combined_ds['product_post'] = xr.where(sam_dates.dt.date == date, post_product_data, np.nan).astype('float32')
                 combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, np.nan).astype('float32')
+                combined_ds['rep_1d'] = xr.where(sam_dates.dt.date == date, rep_1d_data, np.nan).astype('float32')
+                combined_ds['rep_60d'] = xr.where(sam_dates.dt.date == date, rep_60d_data, np.nan).astype('float32')
                 for var in combined_ds.data_vars:
                     combined_ds[var].attrs = attrs
                     combined_ds[var].rio.write_nodata(np.nan, inplace=True)
@@ -310,6 +383,8 @@ class Finalise(ArgoTask):
                 write_cog(combined_ds.product, fname=f'{fname}_product.tif', nodata=np.nan, overwrite=True)
                 write_cog(combined_ds.product_post, fname=f'{fname}_product_post.tif', nodata=np.nan, overwrite=True)
                 write_cog(combined_ds.date_post, fname=f'{fname}_date_post.tif', nodata=np.nan, overwrite=True)
+                write_cog(combined_ds.rep_1d, fname=f'{fname}_rep_1d.tif', nodata=np.nan, overwrite=True)
+                write_cog(combined_ds.rep_60d, fname=f'{fname}_rep_60d.tif', nodata=np.nan, overwrite=True)
                 combined_ds.rio.to_raster(f'{fname}_multiband.tif',driver='COG')
                 samsara_prepare.prepare_samsara(fname.parent)
 
