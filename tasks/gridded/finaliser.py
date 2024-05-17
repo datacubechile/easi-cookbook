@@ -376,7 +376,7 @@ class Finalise(ArgoTask):
 
                 combined_ds['product'] = xr.where(sam_dates.dt.date == date, product_data, np.nan).astype('float32')
                 combined_ds['product_post'] = xr.where(sam_dates.dt.date == date, post_product_data, np.nan).astype('float32')
-                combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, np.nan).astype('float64')
+                combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, np.nan).astype('uint32')
                 combined_ds['rep_1d'] = xr.where(sam_dates.dt.date == date, rep_1d_data, np.nan).astype('float32')
                 combined_ds['rep_60d'] = xr.where(sam_dates.dt.date == date, rep_60d_data, np.nan).astype('float32')
                 for var in combined_ds.data_vars:
