@@ -374,14 +374,14 @@ class Finalise(ArgoTask):
 
                 combined_ds = data_mgs.to_dataset(name='mgs')
 
-                combined_ds['product'] = xr.where(sam_dates.dt.date == date, product_data, np.nan).astype('float32')
-                combined_ds['product_post'] = xr.where(sam_dates.dt.date == date, post_product_data, np.nan).astype('float32')
-                combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, np.nan).astype('uint32')
-                combined_ds['rep_1d'] = xr.where(sam_dates.dt.date == date, rep_1d_data, np.nan).astype('float32')
-                combined_ds['rep_60d'] = xr.where(sam_dates.dt.date == date, rep_60d_data, np.nan).astype('float32')
+                combined_ds['product'] = xr.where(sam_dates.dt.date == date, product_data, 0).astype('uint32')
+                combined_ds['product_post'] = xr.where(sam_dates.dt.date == date, post_product_data, 0).astype('uint32')
+                combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, 0).astype('uint32')
+                combined_ds['rep_1d'] = xr.where(sam_dates.dt.date == date, rep_1d_data, 0).astype('uint32')
+                combined_ds['rep_60d'] = xr.where(sam_dates.dt.date == date, rep_60d_data, 0).astype('uint32')
                 for var in combined_ds.data_vars:
                     combined_ds[var].attrs = attrs
-                    combined_ds[var].rio.write_nodata(np.nan, inplace=True)
+                    combined_ds[var].rio.write_nodata(0, inplace=True)
 
                 fname = mpath / f"{date.strftime('%Y%m%d')}_{filename}"
 
@@ -395,12 +395,12 @@ class Finalise(ArgoTask):
                 gc.collect()
 
                 self._logger.info("Writing final data")
-                write_cog(combined_ds.mgs, fname=f'{fname}_mag.tif', nodata=np.nan, overwrite=True)
-                write_cog(combined_ds.product, fname=f'{fname}_product.tif', nodata=np.nan, overwrite=True)
-                write_cog(combined_ds.product_post, fname=f'{fname}_product_post.tif', nodata=np.nan, overwrite=True)
-                write_cog(combined_ds.date_post, fname=f'{fname}_date_post.tif', nodata=np.nan, overwrite=True)
-                write_cog(combined_ds.rep_1d, fname=f'{fname}_rep_1d.tif', nodata=np.nan, overwrite=True)
-                write_cog(combined_ds.rep_60d, fname=f'{fname}_rep_60d.tif', nodata=np.nan, overwrite=True)
+                write_cog(combined_ds.mgs, fname=f'{fname}_mag.tif', nodata=0, overwrite=True)
+                write_cog(combined_ds.product, fname=f'{fname}_product.tif', nodata=0, overwrite=True)
+                write_cog(combined_ds.product_post, fname=f'{fname}_product_post.tif', nodata=0, overwrite=True)
+                write_cog(combined_ds.date_post, fname=f'{fname}_date_post.tif', nodata=0, overwrite=True)
+                write_cog(combined_ds.rep_1d, fname=f'{fname}_rep_1d.tif', nodata=0, overwrite=True)
+                write_cog(combined_ds.rep_60d, fname=f'{fname}_rep_60d.tif', nodata=0, overwrite=True)
                 combined_ds.rio.to_raster(f'{fname}_multiband.tif',driver='COG')
                 samsara_prepare.prepare_samsara(fname.parent)
 
