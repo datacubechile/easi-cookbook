@@ -603,7 +603,7 @@ class TileProcessor(ArgoTask):
                     post_break['product'] = xr.where(post_break.ts==t,p,post_break.product).astype('float32')
                 
                 # Clean up the data by removing zeros
-                post_break=post_break.where(post_break!=0).astype('float32')
+                post_break=post_break.where(post_break!=0)#.astype('float32')
 
                 for var in post_break.variables:
                     post_break[var].attrs = dataset.attrs
