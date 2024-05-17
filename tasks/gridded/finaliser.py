@@ -184,7 +184,7 @@ class Assemble(ArgoTask):
             for i in range(0, len(lst), n):
                 yield lst[i:i + n]
         
-        dates = list(chunks(dates,10))
+        dates = list(chunks(dates,10)) # Process 10 days at a time
 
         self._logger.debug("Closing local dask cluster")
         
@@ -238,6 +238,8 @@ class Assemble(ArgoTask):
         match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
         filespec = match['filespec']
         # filespec = 'all-trained_negative_of_first_last_negative'
+
+        # TODO: CHECK FLOAT32 ISSUE
         self._logger.info(f"Writing output geotiffs for {filespec}")
         write_cog(mgs, fname = path / f'sam_mgs_{filespec}.tif', nodata=np.nan, overwrite=True).compute()
         write_cog(dates_data, fname = path / f'sam_dates_{filespec}.tif', nodata=0, overwrite=True).compute()
@@ -374,7 +376,7 @@ class Finalise(ArgoTask):
 
                 combined_ds['product'] = xr.where(sam_dates.dt.date == date, product_data, np.nan).astype('float32')
                 combined_ds['product_post'] = xr.where(sam_dates.dt.date == date, post_product_data, np.nan).astype('float32')
-                combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, np.nan).astype('float32')
+                combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, np.nan).astype('float64')
                 combined_ds['rep_1d'] = xr.where(sam_dates.dt.date == date, rep_1d_data, np.nan).astype('float32')
                 combined_ds['rep_60d'] = xr.where(sam_dates.dt.date == date, rep_60d_data, np.nan).astype('float32')
                 for var in combined_ds.data_vars:
