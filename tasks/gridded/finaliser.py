@@ -374,11 +374,11 @@ class Finalise(ArgoTask):
 
                 combined_ds = data_mgs.to_dataset(name='mgs')
 
-                combined_ds['product'] = xr.where(sam_dates.dt.date == date, product_data, 0).astype('uint32')
-                combined_ds['product_post'] = xr.where(sam_dates.dt.date == date, post_product_data, 0).astype('uint32')
+                combined_ds['product'] = xr.where(sam_dates.dt.date == date, product_data, 0).astype('uint8')
+                combined_ds['product_post'] = xr.where(sam_dates.dt.date == date, post_product_data, 0).astype('uint8')
                 combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, 0).astype('uint32')
-                combined_ds['rep_1d'] = xr.where(sam_dates.dt.date == date, rep_1d_data, 0).astype('uint32')
-                combined_ds['rep_60d'] = xr.where(sam_dates.dt.date == date, rep_60d_data, 0).astype('uint32')
+                combined_ds['rep_1d'] = xr.where(sam_dates.dt.date == date, rep_1d_data, 0).astype('uint16')
+                combined_ds['rep_60d'] = xr.where(sam_dates.dt.date == date, rep_60d_data, 0).astype('uint16')
                 for var in combined_ds.data_vars:
                     combined_ds[var].attrs = attrs
                     combined_ds[var].rio.write_nodata(0, inplace=True)

@@ -23,28 +23,28 @@ measurements:
   - name: "product"
     aliases: [satelite, satellite]
     units: "1"
-    dtype: float32
-    nodata: NaN
+    dtype: uint8
+    nodata: 0
   - name: "product_post"
     aliases: [satelite_post, satellite_post]
     units: "1"
-    dtype: float32
-    nodata: NaN
+    dtype: uint8
+    nodata: 0
   - name: "date_post"
     aliases: [fecha_post]
     units: "1"
-    dtype: float32
-    nodata: NaN
+    dtype: uint32
+    nodata: 0
   - name: "rep_1d"
     aliases: [repeticiones_1d]
     units: "1"
-    dtype: float32
-    nodata: NaN
+    dtype: uint16
+    nodata: 0
   - name: "rep_60d"
     aliases: [repeticiones_60d]
     units: "1"
-    dtype: float32
-    nodata: NaN
+    dtype: uint16
+    nodata: 0
   
   # - name: "dates"
   #   aliases: [DATES, date, DATE, dt, DT]
