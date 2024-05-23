@@ -41,8 +41,6 @@ import warnings
 from rasterio.errors import NotGeoreferencedWarning
 warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
 
-from tasks.argo_task import ArgoTask
-
 class Assemble(ArgoTask):
     def __init__(self, input_params: [{str, str}]) -> None:
         """Check and cast input params as required.
