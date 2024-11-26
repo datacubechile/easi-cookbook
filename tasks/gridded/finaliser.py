@@ -400,7 +400,7 @@ class Finalise(ArgoTask):
                 write_cog(combined_ds.rep_1d, fname=f'{fname}_rep_1d.tif', nodata=0, overwrite=True)
                 write_cog(combined_ds.rep_60d, fname=f'{fname}_rep_60d.tif', nodata=0, overwrite=True)
                 combined_ds.rio.to_raster(f'{fname}_multiband.tif',driver='COG')
-                samsara_prepare.prepare_samsara(fname.parent)
+                samsara_prepare.prepare_samsara_raw(fname.parent)
 
                 if self.output['upload']:
                     for file_path in out_path.rglob("*"):

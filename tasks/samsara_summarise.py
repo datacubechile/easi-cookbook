@@ -1,5 +1,6 @@
 import os
 import sys
+import uuid
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,22 +8,30 @@ from tempfile import TemporaryDirectory
 sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src')
 sys.path.insert(1, 'lib-samsara/src/')
 sys.path.insert(1, '.')
+sys.path.insert(1,'/home/jovyan/CSIRO/easi-workflows/tasks/eo3assemble')
+sys.path.insert(1,'/opt/repo/easiwf/easi-workflows/tasks/eo3assemble')
 
 import xarray as xr
 import pandas as pd
 import rioxarray
 from datetime import datetime
 from eodatasets3 import DatasetPrepare
+from easi_assemble import EasiPrepare
+from eodatasets3.images import ValidDataMethod
 
 from dask.distributed import Client, LocalCluster
 from datacube import Datacube
 from tasks.argo_task import ArgoTask
+from tasks import samsara_prepare
 from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
+
 
 import warnings
 from rasterio.errors import NotGeoreferencedWarning
 warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
+
+UUID_NAMESPACE = uuid.UUID("2c5ae732-3fb5-4bcd-b985-045c811ddaa6") 
 
 class Summarise(ArgoTask):
     def __init__(self, input_params: [{str, str}]) -> None:
@@ -77,7 +86,7 @@ class Summarise(ArgoTask):
             )
 
     def summarise(self) -> None:
-        for log in ['distributed', 'distributed.nanny','distributed.scheduler','distributed.client']:
+        for log in ['rasterio', 'distributed', 'distributed.nanny','distributed.scheduler','distributed.client']:
             logger = logging.getLogger(log)
             logger.setLevel(logging.ERROR)
         """Summarise the data."""
@@ -91,19 +100,20 @@ class Summarise(ArgoTask):
         blocks = int(self.summary_grid_size / abs(self.odc_query['resolution'][0]))
 
         coarsened_sum = ds.coarsen(x=blocks, boundary="pad").sum().coarsen(y=blocks, boundary="pad").sum()
-        coarsened_sum = coarsened_sum.where(~coarsened_sum.isnull()).astype('float32')
+        coarsened_sum = coarsened_sum.where(~coarsened_sum.isnull())
         coarsened_sum_agg = coarsened_sum.groupby('time.year').sum().rename('mag_total')
-        coarsened_sum_agg = coarsened_sum_agg.where(coarsened_sum_agg > 0)
-
+        coarsened_sum_agg = coarsened_sum_agg.where(coarsened_sum_agg != 0)
+        
+        self._logger.info('Computing summary')
         data = coarsened_sum_agg.compute()
-        self.close_client()
+        
 
         product = self.new_product
 
         times = len(data.year)
 
-        for index, t in enumerate(data.year):
-            ts = pd.to_datetime(str(t.values))
+        for index, t in enumerate(data.year.values):
+            ts = pd.to_datetime(str(t))
             d = ts.strftime('%Y')
             fname = d
             f_dir = Path(self.temp_dir.name) / fname
@@ -114,26 +124,18 @@ class Summarise(ArgoTask):
                 os.makedirs(f_dir, exist_ok=True)
             
             file = str(f_dir / fname) + "_" + data.name.lower() + ".tif"
+            self._logger.info(f'Exporting raster: {f_dir.stem}')
             data.sel(year=t).rio.to_raster(file)
             
-            with DatasetPrepare(
-                metadata_path=metadata_path,
-                ) as p:
-                    p.product_family = product
-                    p.dataset_version = '4'
-                    p.datetime = datetime(int(ts.strftime('%Y')),int(ts.strftime('%m')),int(ts.strftime('%d')))
-                    p.processed_now()
+            self._logger.info(f'Preparing metadata: {f_dir.stem}')
+            r = samsara_prepare.prepare_samsara_summary(f_dir)
+            if not r:
+                self._logger.error(f"Failed to prepare {f_dir.stem}")
+                continue
 
-                    # for key in data.keys():
-                    p.note_measurement(
-                        data.name.lower(), Path(file).name,
-                        relative_to_dataset_location=True
-                    )
-                    p.properties["odc:file_format"] = "GeoTIFF"
-
-                    p.done(validate_correctness=False)
-            self._logger.info(f'Finished summarising timestep {index+1} of {times}')
-            if self.output['upload']:
-                self.upload_files(f_dir)
+            self._logger.info(f'Finished summarising timestep {index+1} of {len(data.year)}')
+        if self.output['upload']:
+            self.upload_files(Path(self.temp_dir.name))
 
         self._logger.info('Done summarising')
+        self.close_client()

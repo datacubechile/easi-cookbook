@@ -12,6 +12,7 @@ import joblib
 import numpy as np
 import rioxarray
 import xarray as xr
+import geopandas as gpd
 
 sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src')
 sys.path.insert(1, 'lib-samsara/src/')
@@ -32,6 +33,7 @@ from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
 from dea_tools.classification import predict_xr
 from rasterio.enums import Resampling
+from rasterio.features import rasterize
 
 from tasks.common import calc_chunk, s3_download_file
 
@@ -310,14 +312,23 @@ class TileProcessor(ArgoTask):
                             shape=inputImg.rio.shape,
                             resampling = Resampling.nearest)
 
+        # filtrar por region metropolitana
+        s3_download_file(str(prefix / 'region_metropolitana_simp_1kmbuff.geojson'),self.output['bucket'],self.temp_dir.name)
+        region = gpd.read_file(self.temp_dir.name+"/region_metropolitana_simp_1kmbuff.geojson")
+        region = region.to_crs(inputImg.rio.crs)
+        region_polys = [geometry for geometry in region.geometry]
+        region_mask = rasterize(region_polys,
+                                        out_shape = (inputImg.dims['y'],inputImg.dims['x']),
+                                        transform = inputImg.affine )
+
         ## Lugares con cambios
-        sam_bool = xr.where((inputImg.magnitude.notnull()) & (lc.astype(bool)), classified.y_predict, 255).astype(dtype = "uint8").rio.write_crs("epsg:32619", inplace=True).compute()
+        sam_bool = xr.where(((inputImg.magnitude.notnull()) & (lc.astype(bool)) & (region_mask.astype(bool))), classified.y_predict, 255).astype(dtype = "uint8").rio.write_crs("epsg:32619", inplace=True).compute()
 
         ## Magnitudes con cambios
-        sam_mgs = xr.where((classified.y_predict == 1) & (lc.astype(bool)), inputImg.magnitude, np.nan).astype(dtype = "float32").rio.write_crs("epsg:32619", inplace=True).compute()
+        sam_mgs = xr.where(((classified.y_predict == 1) & (lc.astype(bool)) & (region_mask.astype(bool))), inputImg.magnitude, np.nan).astype(dtype = "float32").rio.write_crs("epsg:32619", inplace=True).compute()
 
         ## Fechas con cambios
-        sam_dates = xr.where((classified.y_predict == 1) & (lc.astype(bool)) & (inputImg.magnitude.notnull()), pelt_filtered.date, 0).astype(dtype = "uint32").rio.write_crs("epsg:32619", inplace=True).compute()
+        sam_dates = xr.where(((classified.y_predict == 1) & (lc.astype(bool)) & (region_mask.astype(bool))) & (inputImg.magnitude.notnull()), pelt_filtered.date, 0).astype(dtype = "uint32").rio.write_crs("epsg:32619", inplace=True).compute()
 
         return sam_bool, sam_mgs, sam_dates
 
@@ -512,7 +523,7 @@ class TileProcessor(ArgoTask):
             rf_out.mkdir(parents=True, exist_ok=True)
             t8 = datetime.datetime.now()
 
-            if self.compute_rf == "True":      
+            if self.compute_rf == "True":   
                 sam_bool, sam_mgs, sam_dates = self.run_rf(inputImg, pelt_filtered)
                 t9 = datetime.datetime.now()
                 self._logger.info(f"Computing random forest for {key} took: {t9-t8}")

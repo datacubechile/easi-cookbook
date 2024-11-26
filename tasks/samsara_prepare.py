@@ -12,9 +12,10 @@ sys.path.insert(1,'/opt/repo/easiwf/easi-workflows/tasks/eo3assemble')
 
 from easi_assemble import EasiPrepare
 
-UUID_NAMESPACE = uuid.UUID("e05aa9a6-dedb-405a-8146-53329bbb2a7a") 
+SAMSARA_RAW_UUID_NAMESPACE = uuid.UUID("e05aa9a6-dedb-405a-8146-53329bbb2a7a") 
+SAMSARA_SUMMARY_UUID_NAMESPACE = uuid.UUID("2c5ae732-3fb5-4bcd-b985-045c811ddaa6")
 
-def prepare_samsara(dir):
+def prepare_samsara_raw(dir):
     product = 'samsara_raw'
     # print(dir)
     f_dir = Path(dir)
@@ -48,7 +49,7 @@ def prepare_samsara(dir):
             ## IDs and Labels
             version = 'v04'
             unique_name = f"{Path(files['mag']).stem.replace('_mag','')}-{version}"  # Unique dataset name
-            p.dataset_id = uuid.uuid5(UUID_NAMESPACE, unique_name)  # Unique dataset UUID
+            p.dataset_id = uuid.uuid5(SAMSARA_RAW_UUID_NAMESPACE, unique_name)  # Unique dataset UUID
             unique_name_replace = re.sub('\.', '_', unique_name)
             p.label = f"{unique_name_replace}-{p.product_name}"  # Can not have '.' in label
             p.product_uri = f"https://products.datacubechile.cl/{p.product_name}"  # product_name is added by EasiPrepare().init()
@@ -75,11 +76,55 @@ def prepare_samsara(dir):
         # subprocess.run(cmd, check=True)
         return f'{f_dir}/odc-metadata.yaml'
 
+def prepare_samsara_summary(dir):
+    product = 'samsara_summary'
+    f_dir = Path(dir)
+    metadata_path = f_dir / 'odc-metadata.yaml'
+
+    ts = pd.to_datetime('today')
+    with EasiPrepare(
+        dataset_path=f_dir,
+        product_yaml=Path(__file__).parent / 'samsara_summary.yaml' # This should be in hte same directory as this file
+    ) as p:
+        dataset = Path(f_dir).name
+        file = list(f_dir.rglob('*.tif'))
+        file = file[0] if len(file) == 1 else None
+        if not file:
+            return None
+        date = datetime(int(dataset),12,31,12) # Add 12 hours to make sure timezone mostly works
+        ## IDs and Labels
+        version = 'v04'
+        unique_name = f"{Path(file).stem.replace('_mag_total','')}-{version}"  # Unique dataset name
+        p.dataset_id = uuid.uuid5(SAMSARA_SUMMARY_UUID_NAMESPACE, unique_name)  # Unique dataset UUID
+        unique_name_replace = re.sub('\.', '_', unique_name)
+        p.label = f"{unique_name_replace}-{p.product_name}"  # Can not have '.' in label
+        p.product_uri = f"https://products.datacubechile.cl/{p.product_name}"  # product_name is added by EasiPrepare().init()
+        p.product_family = product
+        p.producer = 'uai.cl'
+        p.datetime = date
+        p.processed_now()
+        p.dataset_version = version
+        p.valid_data_method = ValidDataMethod.filled
+
+        # for key in data.keys():
+        p.note_measurement(
+            'mag_total', Path(file),
+            relative_to_metadata=True
+        )
+        p.properties["odc:file_format"] = "GeoTIFF"
+
+        p.done(validate_correctness=False)
+
+        return f'{f_dir}/odc-metadata.yaml'
 
 @click.command()
 @click.argument('dataset_dir', type=click.STRING)
-def cli(dataset_dir):
-    prepare_samsara(dataset_dir)
+@click.option('--product', type=click.STRING, default='samsara_raw')
+def cli(dataset_dir, product):
+    if product == 'samsara_raw':
+        prepare_samsara_raw(dataset_dir)
+    elif product == 'samsara_summary':
+        prepare_samsara_summary(dataset_dir)
 
 if __name__ == '__main__':
     cli()

@@ -85,8 +85,12 @@ class TileGenerator(ArgoTask):
         # Saving the keys for Argo to split work
         with open(self.FILEPATH_KEYS, "w") as outfile:
             json.dump(keys, outfile)
+        self._logger.info(f"Product cell keys saved to {self.FILEPATH_KEYS}")
+
         # Saving the product cells for workers; these are "dc.load-able" metadata
         with open(self.FILEPATH_CELLS, "wb") as outfile:
             pickle.dump(product_cells, outfile)
+        
+        self._logger.info(f"Product cells saved to {self.FILEPATH_CELLS}")
 
 
