@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import rioxarray
 import xarray as xr
+import geopandas as gpd
 from dask.distributed import Client, LocalCluster
 import dask.array as da
 from datacube import Datacube
@@ -29,6 +30,7 @@ from eodatasets3 import DatasetPrepare
 from tasks.argo_task import ArgoTask
 from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
+from rasterio.features import rasterize
 
 from tasks.common import calc_chunk, s3_download_file, s3_download_folder
 
@@ -217,6 +219,42 @@ class Assemble(ArgoTask):
             arr = arr.where(sam_ts!=0).compute()
             return arr
 
+        def classify_with_shapefile(dataset,shapefile):
+            gdf = gpd.read_file(shapefile)
+            gdf = gdf.to_crs(dataset.rio.crs)
+            polys = [geometry for geometry in gdf.geometry]
+            mask = rasterize(
+                    polys,
+                    out_shape = (dataset.dims['y'],dataset.dims['x']),
+                    transform = dataset.affine
+            )
+            da = dataset[list(dataset.data_vars.keys())[0]].compute()
+            da = xr.where(da.notnull() & mask,1,0)
+            return da
+
+        # Download shapefiles
+        prefix = str(Path(self.output['prefix']) / 'areas_protegidas')
+        tmp_path = Path(self.temp_dir.name) / 'areas_protegidas'
+        self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {tmp_path}")
+        self.s3_download_folder(
+            prefix=prefix,
+            bucket=bucket,
+            path=str(tmp_path)
+        )
+
+        areas_protegidas = classify_with_shapefile(bool_data.to_dataset(), tmp_path / 'Areas Protegidas_metropolitana.shp')
+
+        prefix = str(Path(self.output['prefix']) / 'sitios_prioritarios')
+        tmp_path = Path(self.temp_dir.name) / 'sitios_prioritarios' 
+        self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {tmp_path}")
+        self.s3_download_folder(
+            prefix=prefix,
+            bucket=bucket,
+            path=str(tmp_path)
+        )
+
+        sitios_prioritarios = classify_with_shapefile(bool_data.to_dataset(), tmp_path / 'Sitios Prioritarios.shp')
+
         # Configure rolling window - currently 5 x 5 pixels
         # This has to be an odd number so that we can get the central pixel
         self._logger.info("Counting repetitions")
@@ -247,6 +285,8 @@ class Assemble(ArgoTask):
         write_cog(post_dates_data, fname = path / f'sam_post_dates_{filespec}.tif', nodata=0, overwrite=True).compute()
         write_cog(rep_1d, fname = path / f'sam_rep_1d_{filespec}.tif', nodata=np.nan, overwrite=True).compute()
         write_cog(rep_60d, fname = path / f'sam_rep_60d_{filespec}.tif', nodata=np.nan, overwrite=True).compute()
+        write_cog(areas_protegidas, fname = path / f'sam_areas_protegidas_{filespec}.tif', nodata=0, overwrite=True)
+        write_cog(sitios_prioritarios, fname = path / f'sam_sitios_prioritarios_{filespec}.tif', nodata=0, overwrite=True)
         
         if self.output['upload']:
             for file_path in path.glob("*.tif"):
