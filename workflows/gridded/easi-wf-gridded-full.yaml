@@ -64,13 +64,13 @@ spec:
       value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
     - name: wf_image            # Workflow image to use full image name
-      value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-workflows-base:main.latest"
+      value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-workflows-base:2024.09.0"
     # DEPLOYMENT
     - name: aws_region
       value: "us-west-2"
     - name: git_image
       # TODO Replace with values suitable for your deployment environment.
-      value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/alpine/git:latest"
+      value: alpine/git
     - name: alpine_image
       # TODO Replace with values suitable for your deployment environment.
       value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/ecr-public/docker/library/alpine:latest"
@@ -636,9 +636,20 @@ spec:
           logging.basicConfig(level=logging.INFO)
 
           from tasks.gridded.finaliser import Finalise
+          from tasks.samsara_summarise import Summarise
           
           finaliser = Finalise({{inputs.parameters}})
           finaliser.finalise()
+
+          params_summariser = [
+            {'name': 'odc_query', 'value': '{"product": "samsara_raw", "measurements": "mag", "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "dask_chunks": {"time":6, "x": 1980,"y": 1980}}'},
+            {'name': 'output', 'value': '{"upload": "False", "bucket": "easido-prod-dc-data", "prefix": "products-index/samsara-summary/"}'},
+            {'name': 'summary_grid_size', 'value': '1980'},
+            {'name': 'new_product', 'value': 'samsara_summary'}
+          ]
+
+          summariser = Summarise(params_summariser)
+          summariser.summarise()
 
 
       

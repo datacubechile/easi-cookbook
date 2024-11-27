@@ -313,8 +313,8 @@ class TileProcessor(ArgoTask):
                             resampling = Resampling.nearest)
 
         # filtrar por region metropolitana
-        s3_download_file(str(prefix / 'region_metropolitana_simp_1kmbuff.geojson'),self.output['bucket'],self.temp_dir.name)
-        region = gpd.read_file(self.temp_dir.name+"/region_metropolitana_simp_1kmbuff.geojson")
+        s3_download_file(str(prefix / 'region_metropolitana_simp_vectorised.geojson'),self.output['bucket'],self.temp_dir.name)
+        region = gpd.read_file(self.temp_dir.name+"/region_metropolitana_simp_vectorised.geojson")
         region = region.to_crs(inputImg.rio.crs)
         region_polys = [geometry for geometry in region.geometry]
         region_mask = rasterize(region_polys,
