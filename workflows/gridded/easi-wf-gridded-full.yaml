@@ -53,13 +53,13 @@ spec:
     - name: tile_buffer
       value: '[1650, 1650]'
     - name: pelt_params
-      value: '{"compute_pelt": "False", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
+      value: '{"compute_pelt": "True", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
     - name: neighbor_params
-      value: '{"compute_neighbors": "False", "ways":["last_negative"], "neighbor_radius": "50"}'
+      value: '{"compute_neighbors": "True", "ways":["last_negative"], "neighbor_radius": "50"}'
     - name: texture_params
-      value: '{"compute_textures": "False", "smooth_radius": "15", "glcm_radius": "7"}'
+      value: '{"compute_textures": "True", "smooth_radius": "15", "glcm_radius": "7"}'
     - name: rf_params
-      value: '{"compute_rf": "False", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
+      value: '{"compute_rf": "True", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
     - name: dask_image # data-pipeline image to use for Pods
       value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -199,6 +199,24 @@ spec:
             - name: dates
               from: "{{steps.assembler.outputs.artifacts.dates}}"
         withParam: "{{steps.assembler.outputs.parameters.dates_idx}}"
+    - - name: summariser
+        template: summariser
+        arguments:
+          parameters:
+          - name: output
+            value: "{{workflow.parameters.output}}"
+          - name: way
+            value: "{{steps.assembler.outputs.parameters.way}}"
+          - name: dates_idx
+            value: "{{item}}"
+          - name: package-repo
+            value: "{{workflow.parameters.package-repo}}"
+          - name: package-branch
+            value: "{{workflow.parameters.package-branch}}"
+          - name: package-path
+            value: "{{workflow.parameters.package-path}}"
+          - name: package-secret
+            value: "{{workflow.parameters.package-secret}}"
 
 ##--------------------------------
   - name: tile-generator
@@ -643,7 +661,7 @@ spec:
 
           params_summariser = [
             {'name': 'odc_query', 'value': '{"product": "samsara_raw", "measurements": "mag", "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "dask_chunks": {"time":6, "x": 1980,"y": 1980}}'},
-            {'name': 'output', 'value': '{"upload": "False", "bucket": "easido-prod-dc-data", "prefix": "products-index/samsara-summary/"}'},
+            {'name': 'output', 'value': '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "products-index/samsara-summary/"}'},
             {'name': 'summary_grid_size', 'value': '1980'},
             {'name': 'new_product', 'value': 'samsara_summary'}
           ]
@@ -651,7 +669,115 @@ spec:
           summariser = Summarise(params_summariser)
           summariser.summarise()
 
+  - name: summariser
+    inputs:
+      parameters:
+      - name: output
+      - name: way
+      - name: dates_idx
+      - name: package-repo          # A sidecar package repo
+      - name: package-branch        # The sidecar package repo branch
+      - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
+      - name: package-secret        # Git-credentials format, e.g. git-credentials: $(echo -n "https://username:password@dev.azure.com | base64)
 
+    retryStrategy:
+      limit: "3"
+      retryPolicy: "Always"
+
+    volumes:
+      - name: git-sync
+        emptyDir: {}
+      - name: git-secret
+        secret:
+          secretName: azure-devops-easi-hub-git-ro-creds
+          items:
+            - key: git-credentials
+              path: .git-credentials
+
+    initContainers:
+      - name: init0
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: true
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            git clone --depth 1 --branch "{{inputs.parameters.package-branch}}" "{{inputs.parameters.package-repo}}"
+      - name: init1
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: true
+        volumeMounts:
+          - name: git-secret
+            mountPath: "/secret/git"
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            mkdir easiwf &&
+            cd easiwf &&
+            git config --global credential.helper "store --file /secret/git/.git-credentials" &&
+            git clone --depth 1 --branch main https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows
+      - name: init2
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: true
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            git clone --depth 1 --branch jhodge-edits https://github.com/Data-Observatory/lib-samsara.git
+
+    script:
+      image: "{{workflow.parameters.dask_image}}"
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: AWS_METADATA_SERVICE_TIMEOUT
+          value: '30'
+        - name: AWS_METADATA_SERVICE_NUM_ATTEMPTS
+          value: '5'
+        - name: DATACUBE_CONFIG_PATH
+          value: "/root/.user-secret-easi-odc-v2/.datacube.conf"
+      volumeMounts:
+        - name: user-secret-easi-odc-v2
+          mountPath: '/root/.user-secret-easi-odc-v2'
+          readOnly: true
+        - name: git-sync
+          mountPath: "{{inputs.parameters.package-path}}"
+        # - name: git-secret
+        #   mountPath: "/secret/git"
+      resources: # limit the resources
+        limits:
+          memory: 14Gi
+          cpu: 4000m
+        requests:
+          memory: 14Gi
+          cpu: 3500m
+      workingDir: "{{inputs.parameters.package-path}}"
+      command: [python]
+      source: |
+        if __name__ == "__main__":
+          import sys
+          import json
+          import logging
+          from pathlib import Path
+          
+          package_path = "{{inputs.parameters.package-path}}"
+          package_repo = "{{inputs.parameters.package-repo}}"
+          repo = Path(package_path) / package_repo.split('/')[-1]
+          sys.path.insert(1, str(repo))
+
+          logging.basicConfig(level=logging.INFO)
+
+          from tasks.samsara_summarise import Summarise
+
+          params_summariser = [
+            {'name': 'odc_query', 'value': '{"product": "samsara_raw", "measurements": "mag", "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "dask_chunks": {"time":6, "x": 1980,"y": 1980}}'},
+            {'name': 'output', 'value': '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "products-index/samsara-summary/"}'},
+            {'name': 'summary_grid_size', 'value': '1980'},
+            {'name': 'new_product', 'value': 'samsara_summary'}
+          ]
+
+          summariser = Summarise(params_summariser)
+          summariser.summarise()
       
 ##--------------------------------
   # Exit handler templates
