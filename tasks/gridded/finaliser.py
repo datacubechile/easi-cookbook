@@ -364,6 +364,8 @@ class Finalise(ArgoTask):
             sam_post_dates = path.rglob('sam_post_dates*.tif')
             sam_rep_1d = path.rglob('sam_rep_1d_*.tif')
             sam_rep_60d = path.rglob('sam_rep_60d_*.tif')
+            sam_areas_protegidas = path.rglob('sam_areas_protegidas_*.tif')
+            sam_sitios_prioritarios = path.rglob('sam_sitios_prioritarios_*.tif')
 
             mgs = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
             mgs = xr.combine_by_coords(mgs).compute()
@@ -392,6 +394,12 @@ class Finalise(ArgoTask):
             rep_60d_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_60d]
             rep_60d_data = xr.combine_by_coords(rep_60d_data).compute()
 
+            areas_protegidas_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_areas_protegidas]
+            areas_protegidas_data = xr.combine_by_coords(areas_protegidas_data).compute()
+
+            sitios_prioritarios_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_sitios_prioritarios]
+            sitios_prioritarios_data = xr.combine_by_coords(sitios_prioritarios_data).compute()
+
             attrs = {'crs': 'epsg:32619', 'grid_mapping': 'spatial_ref'}
 
             PATTERN = re.compile('^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
@@ -417,6 +425,8 @@ class Finalise(ArgoTask):
                 combined_ds['date_post'] = xr.where(sam_dates.dt.date == date, post_dates_data, 0).astype('uint32')
                 combined_ds['rep_1d'] = xr.where(sam_dates.dt.date == date, rep_1d_data, 0).astype('uint16')
                 combined_ds['rep_60d'] = xr.where(sam_dates.dt.date == date, rep_60d_data, 0).astype('uint16')
+                combined_ds['areas_protegidas'] = xr.where(sam_dates.dt.date == date, areas_protegidas_data, 0).astype('uint8')
+                combined_ds['sitios_prioritarios'] = xr.where(sam_dates.dt.date == date, sitios_prioritarios_data, 0).astype('uint8')
                 for var in combined_ds.data_vars:
                     combined_ds[var].attrs = attrs
                     combined_ds[var].rio.write_nodata(0, inplace=True)
@@ -439,6 +449,8 @@ class Finalise(ArgoTask):
                 write_cog(combined_ds.date_post, fname=f'{fname}_date_post.tif', nodata=0, overwrite=True)
                 write_cog(combined_ds.rep_1d, fname=f'{fname}_rep_1d.tif', nodata=0, overwrite=True)
                 write_cog(combined_ds.rep_60d, fname=f'{fname}_rep_60d.tif', nodata=0, overwrite=True)
+                write_cog(combined_ds.areas_protegidas, fname=f'{fname}_areas_protegidas.tif', nodata=0, overwrite=True)
+                write_cog(combined_ds.sitios_prioritarios, fname=f'{fname}_sitios_prioritarios.tif', nodata=0, overwrite=True)
                 # combined_ds.rio.to_raster(f'{fname}_multiband.tif',driver='COG')
                 samsara_prepare.prepare_samsara_raw(fname.parent)
 
@@ -458,4 +470,3 @@ class Finalise(ArgoTask):
                         )
             else:
                 self._logger.info(f"{date} has no data, skipping")
-                
