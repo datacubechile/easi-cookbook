@@ -35,6 +35,8 @@ def prepare_samsara_raw(dir):
         'date_post': next(f_dir.rglob('*_date_post.tif'),None),
         'rep_1d': next(f_dir.rglob('*_rep_1d.tif'),None),
         'rep_60d': next(f_dir.rglob('*_rep_60d.tif'),None),
+        'areas_protegidas': next(f_dir.rglob('*_areas_protegidas.tif'),None),
+        'sitios_prioritarios': next(f_dir.rglob('*_sitios_prioritarios.tif'),None),
         # 'change':'clasified_ndvi-neg-change_LC.tif'
     }
 
