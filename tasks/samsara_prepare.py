@@ -113,6 +113,10 @@ def prepare_samsara_summary(dir):
             'mag_total', Path(file),
             relative_to_metadata=True
         )
+        p.note_measurement(
+            'mag_count', Path(file),
+            relative_to_metadata=True
+        )
         p.properties["odc:file_format"] = "GeoTIFF"
 
         p.done(validate_correctness=False)

@@ -104,14 +104,19 @@ class Summarise(ArgoTask):
         coarsened_sum_agg = coarsened_sum.groupby('time.year').sum().rename('mag_total')
         coarsened_sum_agg = coarsened_sum_agg.where(coarsened_sum_agg != 0)
 
-        coarsened_count = ds.coarsen(x=blocks, boundary="pad").count().coarsen(y=blocks, boundary="pad").count()
+        data_for_count = xr.where(~ds.isnull(),1,0).astype('int16')
+        coarsened_count = data_for_count.coarsen(x=blocks, boundary="pad").sum().coarsen(y=blocks, boundary="pad").sum()
         coarsened_count = coarsened_count.where(~coarsened_count.isnull())
-        coarsened_count_agg = coarsened_count.groupby('time.year').count().rename('mag_total')
+        coarsened_count_agg = coarsened_count.groupby('time.year').sum().rename('mag_count')
         coarsened_count_agg = coarsened_count_agg.where(coarsened_count_agg != 0)
+        
+        dataset = coarsened_sum_agg.to_dataset()
+        dataset['mag_count'] = coarsened_count_agg.astype('int16')
 
         self._logger.info('Computing summary')
-        data_sum = coarsened_sum_agg.compute()
-        data_count = coarsened_count_agg.compute()
+        dataset = dataset.compute()
+        data_sum = dataset.mag_total
+        data_count = dataset.mag_count
 
         product = self.new_product
 
