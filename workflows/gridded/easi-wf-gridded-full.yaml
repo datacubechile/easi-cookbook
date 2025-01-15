@@ -752,11 +752,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 14Gi
-          cpu: 4000m
+          memory: 28Gi
+          cpu: 7000m
         requests:
-          memory: 14Gi
-          cpu: 3500m
+          memory: 28Gi
+          cpu: 7000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
