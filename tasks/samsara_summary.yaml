@@ -1,4 +1,3 @@
----
 name: samsara_summary
 description: Samsara 2km x 2km annual summary data
 metadata_type: eo3
@@ -10,6 +9,11 @@ metadata:
 measurements:
   - name: "mag_total"
     aliases: [MAG_TOTAL, MAG, mag, magnitude_total, magnitude, magnitud_total, magnitud]
+    units: "1"
+    dtype: float32
+    nodata: NaN
+  - name: "mag_count"
+    aliases: [MAG_COUNT, COUNT, count, magnitude_count, magnitude, magnitud_count]
     units: "1"
     dtype: float32
     nodata: NaN

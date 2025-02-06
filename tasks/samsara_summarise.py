@@ -103,37 +103,47 @@ class Summarise(ArgoTask):
         coarsened_sum = coarsened_sum.where(~coarsened_sum.isnull())
         coarsened_sum_agg = coarsened_sum.groupby('time.year').sum().rename('mag_total')
         coarsened_sum_agg = coarsened_sum_agg.where(coarsened_sum_agg != 0)
+
+        data_for_count = xr.where(~ds.isnull(),1,0).astype('int16')
+        coarsened_count = data_for_count.coarsen(x=blocks, boundary="pad").sum().coarsen(y=blocks, boundary="pad").sum()
+        coarsened_count = coarsened_count.where(~coarsened_count.isnull())
+        coarsened_count_agg = coarsened_count.groupby('time.year').sum().rename('mag_count')
+        coarsened_count_agg = coarsened_count_agg.where(coarsened_count_agg != 0)
         
+        dataset = coarsened_sum_agg.to_dataset()
+        dataset['mag_count'] = coarsened_count_agg.astype('int16')
+
         self._logger.info('Computing summary')
-        data = coarsened_sum_agg.compute()
-        
+        dataset = dataset.compute()
+        data_sum = dataset.mag_total
+        data_count = dataset.mag_count
 
         product = self.new_product
 
-        times = len(data.year)
+        times = len(data_sum.year)
 
-        for index, t in enumerate(data.year.values):
+        for index, t in enumerate(data_sum.year.values):
             ts = pd.to_datetime(str(t))
             d = ts.strftime('%Y')
             fname = d
             f_dir = Path(self.temp_dir.name) / fname
             metadata_path = f_dir / 'odc-metadata.yaml'
             fname = product.lower()+"_"+d
-            
+
             if not f_dir.exists():
                 os.makedirs(f_dir, exist_ok=True)
-            
-            file = str(f_dir / fname) + "_" + data.name.lower() + ".tif"
+    
             self._logger.info(f'Exporting raster: {f_dir.stem}')
-            data.sel(year=t).rio.to_raster(file)
-            
+            data_sum.sel(year=t).rio.to_raster(str(f_dir / fname) + "_" + data_sum.name.lower() + ".tif")
+            data_count.sel(year=t).rio.to_raster(str(f_dir / fname) + "_" + data_count.name.lower() + ".tif")
+
             self._logger.info(f'Preparing metadata: {f_dir.stem}')
             r = samsara_prepare.prepare_samsara_summary(f_dir)
             if not r:
                 self._logger.error(f"Failed to prepare {f_dir.stem}")
                 continue
 
-            self._logger.info(f'Finished summarising timestep {index+1} of {len(data.year)}')
+            self._logger.info(f'Finished summarising timestep {index+1} of {len(data_sum.year)}')
         if self.output['upload']:
             self.upload_files(Path(self.temp_dir.name))
 

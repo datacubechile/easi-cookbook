@@ -35,6 +35,8 @@ def prepare_samsara_raw(dir):
         'date_post': next(f_dir.rglob('*_date_post.tif'),None),
         'rep_1d': next(f_dir.rglob('*_rep_1d.tif'),None),
         'rep_60d': next(f_dir.rglob('*_rep_60d.tif'),None),
+        'areas_protegidas': next(f_dir.rglob('*_areas_protegidas.tif'),None),
+        'sitios_prioritarios': next(f_dir.rglob('*_sitios_prioritarios.tif'),None),
         # 'change':'clasified_ndvi-neg-change_LC.tif'
     }
 
@@ -80,42 +82,45 @@ def prepare_samsara_summary(dir):
     product = 'samsara_summary'
     f_dir = Path(dir)
     metadata_path = f_dir / 'odc-metadata.yaml'
+    files = {
+        # 'bool':'clasified_bool_LC.tif',
+        'mag_total':next(f_dir.rglob('*_mag_total.tif'),None),
+        'mag_count': next(f_dir.rglob('*_mag_count.tif'),None),
+    }
+    if files['mag_total'] is not None:
+        ts = pd.to_datetime('today')
+        with EasiPrepare(
+            dataset_path=f_dir,
+            product_yaml=Path(__file__).parent / 'samsara_summary.yaml' # This should be in hte same directory as this file
+        ) as p:
+            dataset = Path(f_dir).name
 
-    ts = pd.to_datetime('today')
-    with EasiPrepare(
-        dataset_path=f_dir,
-        product_yaml=Path(__file__).parent / 'samsara_summary.yaml' # This should be in hte same directory as this file
-    ) as p:
-        dataset = Path(f_dir).name
-        file = list(f_dir.rglob('*.tif'))
-        file = file[0] if len(file) == 1 else None
-        if not file:
-            return None
-        date = datetime(int(dataset),12,31,12) # Add 12 hours to make sure timezone mostly works
-        ## IDs and Labels
-        version = 'v04'
-        unique_name = f"{Path(file).stem.replace('_mag_total','')}-{version}"  # Unique dataset name
-        p.dataset_id = uuid.uuid5(SAMSARA_SUMMARY_UUID_NAMESPACE, unique_name)  # Unique dataset UUID
-        unique_name_replace = re.sub(r'\.', '_', unique_name)
-        p.label = f"{unique_name_replace}-{p.product_name}"  # Can not have '.' in label
-        p.product_uri = f"https://products.datacubechile.cl/{p.product_name}"  # product_name is added by EasiPrepare().init()
-        p.product_family = product
-        p.producer = 'uai.cl'
-        p.datetime = date
-        p.processed_now()
-        p.dataset_version = version
-        p.valid_data_method = ValidDataMethod.filled
-
-        # for key in data.keys():
-        p.note_measurement(
-            'mag_total', Path(file),
-            relative_to_metadata=True
-        )
-        p.properties["odc:file_format"] = "GeoTIFF"
-
-        p.done(validate_correctness=False)
-
-        return f'{f_dir}/odc-metadata.yaml'
+            date = datetime(int(dataset),12,31,12) # Add 12 hours to make sure timezone mostly works
+            ## IDs and Labels
+            version = 'v04'
+            unique_name = f"{Path(files['mag_total']).stem.replace('_mag_total','')}-{version}"  # Unique dataset name
+            p.dataset_id = uuid.uuid5(SAMSARA_SUMMARY_UUID_NAMESPACE, unique_name)  # Unique dataset UUID
+            unique_name_replace = re.sub('\.', '_', unique_name)
+            p.label = f"{unique_name_replace}-{p.product_name}"  # Can not have '.' in label
+            p.product_uri = f"https://products.datacubechile.cl/{p.product_name}"  # product_name is added by EasiPrepare().init()
+            p.product_family = product
+            p.producer = 'uai.cl'
+            p.datetime = date
+            p.processed_now()
+            p.dataset_version = version
+            p.valid_data_method = ValidDataMethod.filled
+            for key, file in files.items():
+                if file is not None:
+                    p.note_measurement(
+                        key.lower(),
+                        Path(f_dir / file),
+                        relative_to_metadata = True
+                    )
+                else:
+                    Exception(f"File {key} not found")
+            p.properties["odc:file_format"] = "GeoTIFF"
+            p.done(validate_correctness=False)
+            return f'{f_dir}/odc-metadata.yaml'
 
 @click.command()
 @click.argument('dataset_dir', type=click.STRING)

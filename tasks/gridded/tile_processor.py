@@ -305,8 +305,8 @@ class TileProcessor(ArgoTask):
         classified=classified.chunk({'x':500,'y':500})
 
         # filtrar por landcover especial y alinear a classified
-        s3_download_file(str(prefix / 'LC_union_4y7_cog.tif'),self.output['bucket'],self.temp_dir.name)
-        lc_ = xr.load_dataset(self.temp_dir.name+"/LC_union_4y7_cog.tif", engine="rasterio").band_data.squeeze()
+        s3_download_file(str(prefix / 'LC_union_4y7_cog_cleaned_2x1.tif'),self.output['bucket'],self.temp_dir.name)
+        lc_ = xr.load_dataset(self.temp_dir.name+"/LC_union_4y7_cog_cleaned_2x1.tif", engine="rasterio").band_data.squeeze()
         lc = lc_.rio.reproject(inputImg.rio.crs,
                             transform=inputImg.rio.transform(),
                             shape=inputImg.rio.shape,

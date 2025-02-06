@@ -43,7 +43,7 @@ spec:
       # TODO Replace with values suitable for your deployment environment.
       value: '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final_prefix": "products-index/samsara-raw/"}'
     - name: roi # Region of Interest
-      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2024-12-31T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
+      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2025-12-31T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
     - name: size # Tile size in odc_query.output_crs units
       value: 18000
     - name: tiles_per_worker
@@ -53,13 +53,15 @@ spec:
     - name: tile_buffer
       value: '[1650, 1650]'
     - name: pelt_params
-      value: '{"compute_pelt": "True", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
+      value: '{"compute_pelt": "False", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
     - name: neighbor_params
-      value: '{"compute_neighbors": "True", "ways":["last_negative"], "neighbor_radius": "50"}'
+      value: '{"compute_neighbors": "False", "ways":["last_negative"], "neighbor_radius": "50"}'
     - name: texture_params
-      value: '{"compute_textures": "True", "smooth_radius": "15", "glcm_radius": "7"}'
+      value: '{"compute_textures": "False", "smooth_radius": "15", "glcm_radius": "7"}'
     - name: rf_params
-      value: '{"compute_rf": "True", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
+      value: '{"compute_rf": "False", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
+    - name: finaliser_params
+      value: '{"finalise": "False", "summarise": "True"}'
     - name: dask_image # data-pipeline image to use for Pods
       value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -207,8 +209,6 @@ spec:
             value: "{{workflow.parameters.output}}"
           - name: way
             value: "{{steps.assembler.outputs.parameters.way}}"
-          - name: dates_idx
-            value: "{{item}}"
           - name: package-repo
             value: "{{workflow.parameters.package-repo}}"
           - name: package-branch
@@ -547,9 +547,22 @@ spec:
 
           package_path        = "{{inputs.parameters.package-path}}"
           package_repo        = "https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows"
-          
-          assembler = Assemble({{inputs.parameters}})
-          assembler.assemble()
+
+          finaliser_params = {{workflow.parameters.finaliser_params}}
+
+          if finaliser_params['finalise'] == 'True':
+            assembler = Assemble({{inputs.parameters}})
+            assembler.assemble()
+          else:
+            logging.info("Skipping assembly.")
+            with open('/tmp/dates_idx', 'w') as outfile:
+              json.dump([],outfile)
+
+            with open('/tmp/dates','w') as outfile:
+              json.dump([], outfile)
+
+            with open('/tmp/way', 'w') as outfile:
+              outfile.write("")
 
 ##--------------------------------
   - name: finaliser
@@ -632,11 +645,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 14Gi
-          cpu: 4000m
+          memory: 7Gi
+          cpu: 2000m
         requests:
-          memory: 14Gi
-          cpu: 3500m
+          memory: 7Gi
+          cpu: 1500m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -654,16 +667,20 @@ spec:
           logging.basicConfig(level=logging.INFO)
 
           from tasks.gridded.finaliser import Finalise
-          
-          finaliser = Finalise({{inputs.parameters}})
-          finaliser.finalise()
+
+          finaliser_params = {{workflow.parameters.finaliser_params}}
+
+          if finaliser_params['finalise'] == 'True':
+            finaliser = Finalise({{inputs.parameters}})
+            finaliser.finalise()
+          else:
+            logging.info("Skipping finalisation.")
 
   - name: summariser
     inputs:
       parameters:
       - name: output
       - name: way
-      - name: dates_idx
       - name: package-repo          # A sidecar package repo
       - name: package-branch        # The sidecar package repo branch
       - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
@@ -735,11 +752,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 14Gi
-          cpu: 4000m
+          memory: 28Gi
+          cpu: 7000m
         requests:
-          memory: 14Gi
-          cpu: 3500m
+          memory: 28Gi
+          cpu: 7000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -758,15 +775,20 @@ spec:
 
           from tasks.samsara_summarise import Summarise
 
-          params_summariser = [
-            {'name': 'odc_query', 'value': '{"product": "samsara_raw", "measurements": "mag", "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "dask_chunks": {"time":6, "x": 1980,"y": 1980}}'},
-            {'name': 'output', 'value': '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "products-index/samsara-summary/"}'},
-            {'name': 'summary_grid_size', 'value': '1980'},
-            {'name': 'new_product', 'value': 'samsara_summary'}
-          ]
+          finaliser_params = {{workflow.parameters.finaliser_params}}
 
-          summariser = Summarise(params_summariser)
-          summariser.summarise()
+          if finaliser_params['summarise'] == 'True':
+            params_summariser = [
+              {'name': 'odc_query', 'value': '{"product": "samsara_raw", "measurements": "mag", "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "dask_chunks": {"time":6, "x": 1980,"y": 1980}}'},
+              {'name': 'output', 'value': '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "products-index/samsara-summary/"}'},
+              {'name': 'summary_grid_size', 'value': '1980'},
+              {'name': 'new_product', 'value': 'samsara_summary'}
+            ]
+
+            summariser = Summarise(params_summariser)
+            summariser.summarise()
+          else:
+            logging.info("Skipping summarising.")
       
 ##--------------------------------
   # Exit handler templates
