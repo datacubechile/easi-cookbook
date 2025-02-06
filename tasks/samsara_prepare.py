@@ -50,7 +50,7 @@ def prepare_samsara_raw(dir):
             version = 'v04'
             unique_name = f"{Path(files['mag']).stem.replace('_mag','')}-{version}"  # Unique dataset name
             p.dataset_id = uuid.uuid5(SAMSARA_RAW_UUID_NAMESPACE, unique_name)  # Unique dataset UUID
-            unique_name_replace = re.sub('\.', '_', unique_name)
+            unique_name_replace = re.sub(r'\.', '_', unique_name)
             p.label = f"{unique_name_replace}-{p.product_name}"  # Can not have '.' in label
             p.product_uri = f"https://products.datacubechile.cl/{p.product_name}"  # product_name is added by EasiPrepare().init()
             p.product_family = product
@@ -96,7 +96,7 @@ def prepare_samsara_summary(dir):
         version = 'v04'
         unique_name = f"{Path(file).stem.replace('_mag_total','')}-{version}"  # Unique dataset name
         p.dataset_id = uuid.uuid5(SAMSARA_SUMMARY_UUID_NAMESPACE, unique_name)  # Unique dataset UUID
-        unique_name_replace = re.sub('\.', '_', unique_name)
+        unique_name_replace = re.sub(r'\.', '_', unique_name)
         p.label = f"{unique_name_replace}-{p.product_name}"  # Can not have '.' in label
         p.product_uri = f"https://products.datacubechile.cl/{p.product_name}"  # product_name is added by EasiPrepare().init()
         p.product_family = product

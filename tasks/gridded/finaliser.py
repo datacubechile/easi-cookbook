@@ -32,7 +32,7 @@ from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
 from rasterio.features import rasterize
 
-from tasks.common import calc_chunk, s3_download_file, s3_download_folder
+from tasks.common import get_most_recent_dates
 
 from tasks import samsara_prepare
 
@@ -270,7 +270,7 @@ class Assemble(ArgoTask):
         self.close_client()
 
         # Prepare geotiffs for output
-        PATTERN = re.compile('^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
+        PATTERN = re.compile(r'^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
         match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
         filespec = match['filespec']
         # filespec = 'all-trained_negative_of_first_last_negative'
@@ -292,7 +292,7 @@ class Assemble(ArgoTask):
             for file_path in path.glob("*.tif"):
                 if not file_path.is_file():
                     continue
-                key = str(Path(self.output['prefix']) / 'final' / file_path.relative_to(self.temp_dir.name))
+                key = str(Path(self.output['prefix']) / 'final' / datetime.datetime.now().strftime('%Y%m%d') / file_path.relative_to(self.temp_dir.name))
 
                 self._logger.info(f"    Uploading {file_path} to s3://{bucket}/{key}")
                 self.s3_upload_file(
@@ -346,16 +346,30 @@ class Finalise(ArgoTask):
             # Download data
             bucket = self.output["bucket"]
             prefix = str(Path(self.output['prefix']) / 'final')
+            dt_format = '%Y%m%d'
+            max_date, second_date = get_most_recent_dates(bucket, prefix, dt_format)
+            max_date_str = max_date.strftime(dt_format)
+            second_date_str = second_date.strftime(dt_format)
             path = Path(self.temp_dir.name)
 
-            self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {path}")
+            self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{max_date_str} to {path / max_date_str}")
             self.s3_download_folder(
-                prefix=prefix,
+                prefix=f"{prefix}/{max_date_str}",
                 bucket=bucket,
-                path=str(path)
+                path=str(path / max_date_str)
             )
 
-            # Get all the files
+            self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{second_date_str} to {path / second_date_str}")
+            self.s3_download_folder(
+                prefix=f"{prefix}/{second_date_str}",
+                bucket=bucket,
+                path=str(path / second_date_str)
+            )
+
+            path = path / max_date_str
+            second_path = path / second_date_str
+
+            # Get all the files for the most recent run
             sam_bool = path.rglob('sam_bool*.tif')
             sam_dates = path.rglob('sam_dates*.tif')
             sam_mgs = path.rglob('sam_mgs*.tif')
@@ -366,6 +380,16 @@ class Finalise(ArgoTask):
             sam_rep_60d = path.rglob('sam_rep_60d_*.tif')
             sam_areas_protegidas = path.rglob('sam_areas_protegidas_*.tif')
             sam_sitios_prioritarios = path.rglob('sam_sitios_prioritarios_*.tif')
+
+            # Get the files for the second most recent run
+            sam_dates_2 = second_path.rglob('sam_dates*.tif')
+
+            
+            # sam_mgs_2 = second_path.rglob('sam_mgs*.tif')
+            # sam_rep_1d_2 = second_path.rglob('sam_rep_1d_*.tif')
+            # sam_rep_60d_2 = second_path.rglob('sam_rep_60d_*.tif')
+            # sam_areas_protegidas_2 = second_path.rglob('sam_areas_protegidas_*.tif')
+            # sam_sitios_prioritarios_2 = second_path.rglob('sam_sitios_prioritarios_*.tif')
 
             mgs = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
             mgs = xr.combine_by_coords(mgs).compute()
@@ -402,7 +426,7 @@ class Finalise(ArgoTask):
 
             attrs = {'crs': 'epsg:32619', 'grid_mapping': 'spatial_ref'}
 
-            PATTERN = re.compile('^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
+            PATTERN = re.compile(r'^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
             match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
             rf_version = match['rf_version']
 
