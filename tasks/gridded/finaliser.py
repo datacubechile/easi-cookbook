@@ -77,7 +77,7 @@ class Assemble(ArgoTask):
             self._client = None
             self._cluster = None
 
-    def assemble(self) -> None:
+    def assemble(self, get_dates_only=False) -> None:
         for log in ['distributed', 'distributed.nanny','distributed.scheduler','distributed.client']:
             logger = logging.getLogger(log)
             logger.setLevel(logging.ERROR)
@@ -94,40 +94,12 @@ class Assemble(ArgoTask):
             path=str(path)
         )
 
-        # Get all the files
-        # sam_bool = path.rglob('sam_bool*.tif')
-        # sam_dates = path.rglob('sam_dates*.tif')
-        # sam_mgs = path.rglob('sam_mgs*.tif')
-        # sam_prod = path.rglob('sam_products*.tif')
-        # sam_post_prod = path.rglob('sam_post_products*.tif')
-        # sam_post_dates = path.rglob('sam_post_dates*.tif')
-
         sam_bool_path = path / '*/*/sam_bool*.tif'
         sam_dates_path = path / '*/*/sam_dates*.tif'
         sam_mgs_path = path / '*/*/sam_mgs*.tif'
         sam_prod_path = path / '*/*/sam_products*.tif'
         sam_post_prod_path = path / '*/*/sam_post_products*.tif'
         sam_post_dates_path = path / '*/*/sam_post_dates*.tif'
-
-        # Merge into data arrays
-        # mgs_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
-        # mgs = xr.combine_by_coords(mgs_).compute()
-
-        # dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_dates]
-        # dates_data = xr.combine_by_coords(dates_).compute()
-        # sam_timestamps = dates_data.where(dates_data != 0)
-
-        # bool_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
-        # bool_data = xr.combine_by_coords(bool_).compute()
-
-        # product_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
-        # product_data = xr.combine_by_coords(product_).compute()
-
-        # post_prod_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
-        # post_product_data = xr.combine_by_coords(post_prod_).compute()
-
-        # post_dates_ = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
-        # post_dates_data = xr.combine_by_coords(post_dates_).compute()
 
         mgs = xr.open_mfdataset(str(sam_mgs_path), parallel=True).squeeze(drop=True).rename({'band_data':'mgs'}).mgs
         dates_data = xr.open_mfdataset(str(sam_dates_path), parallel=True).squeeze(drop=True).rename({'band_data':'dates'}).dates
@@ -185,9 +157,9 @@ class Assemble(ArgoTask):
                 yield lst[i:i + n]
         
         dates = list(chunks(dates,10)) # Process 10 days at a time
-
-        self._logger.debug("Closing local dask cluster")
         
+        if get_dates_only:
+            return dates       
         
         # Function to count neighbours based on a rolling window and a given number of days
         def count_neighbours(data,days=1):
@@ -267,6 +239,7 @@ class Assemble(ArgoTask):
         rep_1d = count_neighbours(rolling,days=1).where(sam_ts!=0) - 1 # Don't count the central pixel
         rep_60d = count_neighbours(rolling,days=60).where(sam_ts!=0) - 1 # Don't count the central pixel
         rep_60d = rep_60d-rep_1d
+        self._logger.debug("Closing local dask cluster")
         self.close_client()
 
         # Prepare geotiffs for output
@@ -292,7 +265,9 @@ class Assemble(ArgoTask):
             for file_path in path.glob("*.tif"):
                 if not file_path.is_file():
                     continue
-                key = str(Path(self.output['prefix']) / 'final' / datetime.datetime.now().strftime('%Y%m%d') / file_path.relative_to(self.temp_dir.name))
+                date_key = min(datetime.datetime.now(), datetime.datetime.strptime(self.roi["time_end"],'%Y-%m-%d'))
+                date_key = date_key.strftime('%Y%m%d')
+                key = str(Path(self.output['prefix']) / 'final' / date_key / file_path.relative_to(self.temp_dir.name))
 
                 self._logger.info(f"    Uploading {file_path} to s3://{bucket}/{key}")
                 self.s3_upload_file(
@@ -366,8 +341,8 @@ class Finalise(ArgoTask):
                 path=str(path / second_date_str)
             )
 
-            path = path / max_date_str
             second_path = path / second_date_str
+            path = path / max_date_str
 
             # Get all the files for the most recent run
             sam_bool = path.rglob('sam_bool*.tif')
@@ -382,8 +357,8 @@ class Finalise(ArgoTask):
             sam_sitios_prioritarios = path.rglob('sam_sitios_prioritarios_*.tif')
 
             # Get the files for the second most recent run
-            sam_dates_2 = second_path.rglob('sam_dates*.tif')
-
+            sam_bool_2 = second_path.rglob('sam_bool*.tif')
+            # TODO: compare the two dates and get the differences - add to output for email
             
             # sam_mgs_2 = second_path.rglob('sam_mgs*.tif')
             # sam_rep_1d_2 = second_path.rglob('sam_rep_1d_*.tif')
@@ -398,10 +373,25 @@ class Finalise(ArgoTask):
             dates_data = xr.combine_by_coords(dates_data).compute()
             sam_timestamps = dates_data.where(dates_data != 0)
             del dates_data
-            sam_dates = xr.DataArray(pd.to_datetime(sam_timestamps, unit='s').values,dims=['y','x'])
+
+            # Function to convert timestamps to datetime - must be a 1-D array
+            def ts_to_datetime(arr):
+                return pd.to_datetime(arr, unit='s')
+
+            # sam_dates = xr.DataArray(pd.to_datetime(sam_timestamps*1e9, unit='ns').values,dims=['y','x'])
+            # Apply ts_to_datetime along the y-dimension
+            sam_dates = xr.apply_ufunc(
+                ts_to_datetime,
+                sam_timestamps,
+                input_core_dims=[['x']],
+                output_core_dims=['x'],
+                vectorize=True,
+            )
 
             bool_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
             bool_data = xr.combine_by_coords(bool_data).compute()
+            bool_data_2 = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool_2]
+            bool_data_2 = xr.combine_by_coords(bool_data_2).compute()
 
             product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
             product_data = xr.combine_by_coords(product_data).compute()
