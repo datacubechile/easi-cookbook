@@ -265,7 +265,7 @@ class Assemble(ArgoTask):
             for file_path in path.glob("*.tif"):
                 if not file_path.is_file():
                     continue
-                date_key = min(datetime.datetime.now(), datetime.datetime.strptime(self.roi["time_end"],'%Y-%m-%d'))
+                date_key = min(datetime.datetime.now(), datetime.datetime.strptime(self.roi["time_end"][:10],'%Y-%m-%d'))
                 date_key = date_key.strftime('%Y%m%d')
                 key = str(Path(self.output['prefix']) / 'final' / date_key / file_path.relative_to(self.temp_dir.name))
 
