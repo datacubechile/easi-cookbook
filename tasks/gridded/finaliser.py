@@ -393,8 +393,8 @@ class Finalise(ArgoTask):
 
             bool_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
             bool_data = xr.combine_by_coords(bool_data).compute()
-            bool_data_2 = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool_2]
-            bool_data_2 = xr.combine_by_coords(bool_data_2).compute()
+            # bool_data_2 = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool_2]
+            # bool_data_2 = xr.combine_by_coords(bool_data_2).compute()
 
             product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
             product_data = xr.combine_by_coords(product_data).compute()
