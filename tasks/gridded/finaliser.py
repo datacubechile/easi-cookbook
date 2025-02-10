@@ -326,7 +326,6 @@ class Finalise(ArgoTask):
             dt_format = '%Y%m%d'
             max_date, second_date = get_most_recent_dates(bucket, prefix, dt_format)
             max_date_str = max_date.strftime(dt_format)
-            second_date_str = second_date.strftime(dt_format)
             path = Path(self.temp_dir.name)
 
             self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{max_date_str} to {path / max_date_str}")
@@ -335,16 +334,8 @@ class Finalise(ArgoTask):
                 bucket=bucket,
                 path=str(path / max_date_str)
             )
-
-            self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{second_date_str} to {path / second_date_str}")
-            self.s3_download_folder(
-                prefix=f"{prefix}/{second_date_str}",
-                bucket=bucket,
-                path=str(path / second_date_str)
-            )
-
-            second_path = path / second_date_str
-            path = path / max_date_str
+            base_path = path
+            path = base_path / max_date_str
 
             # Get all the files for the most recent run
             sam_bool = path.rglob('sam_bool*.tif')
@@ -358,8 +349,18 @@ class Finalise(ArgoTask):
             sam_areas_protegidas = path.rglob('sam_areas_protegidas_*.tif')
             sam_sitios_prioritarios = path.rglob('sam_sitios_prioritarios_*.tif')
 
-            # Get the files for the second most recent run
-            sam_bool_2 = second_path.rglob('sam_bool*.tif')
+            if second_date: 
+                second_date_str = second_date.strftime(dt_format)
+                self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{second_date_str} to {base_path / second_date_str}")
+                self.s3_download_folder(
+                    prefix=f"{prefix}/{second_date_str}",
+                    bucket=bucket,
+                    path=str(base_path / second_date_str)
+                )
+
+                second_path = base_path / second_date_str
+                # Get the files for the second most recent run
+                sam_bool_2 = second_path.rglob('sam_bool*.tif')
             # TODO: compare the two dates and get the differences - add to output for email
             
             # sam_mgs_2 = second_path.rglob('sam_mgs*.tif')

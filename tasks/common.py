@@ -301,7 +301,7 @@ def get_most_recent_dates(bucket, prefix, dt_format='%Y%m%d'):
         # dates = [p['Prefix'].split("/")[-2] for p in objs['CommonPrefixes']]
         max_date = max(dates)
         dates.remove(max_date)
-        second_date = max(dates)
+        second_date = max(dates) if len(dates) != 0 else None
 
     except (ClientError) as e:
         logging.error(e)
