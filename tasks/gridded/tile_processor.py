@@ -226,8 +226,8 @@ class TileProcessor(ArgoTask):
 
         return fpelt
     
-    def run_neighbors(self, ds: Dataset) -> (Dataset, Dataset):
-        pelt_filtered = sfilter.filter_by_variable(ds, filter_type = 'last_negative', variable = 'magnitude').chunk({'x':200, 'y':200})
+    def run_neighbors(self, ds: Dataset, filter_type: str='last_negative') -> (Dataset, Dataset):
+        pelt_filtered = sfilter.filter_by_variable(ds, filter_type=filter_type, variable = 'magnitude').chunk({'x':200, 'y':200})
 
         date_std = sns.stats(pelt_filtered, stat = "std", kernel = int(self.neighbor_params['neighbor_radius']), variable = 'date')
         date_cnt = sns.stats(pelt_filtered, stat = "count", kernel = int(self.neighbor_params['neighbor_radius']), variable = 'date')
@@ -439,205 +439,206 @@ class TileProcessor(ArgoTask):
                 self._logger.error("The loaded data does not have the expected number of breakpoints.")
                 raise
             self._logger.info("Pelt files loaded from S3")
+        
+        way = self.neighbor_params['way']
+        # for way in self.neighbor_params['ways']:
+        print(f"Polygon: {self.id_}, using: {way}")
 
-        for way in self.neighbor_params['ways']:
-            print(f"Polygon: {self.id_}, using: {way}")
-
-            neighs_out = out_folder / 'NEIGHS' / way / cellref
-            neighs_out.mkdir(parents=True, exist_ok=True)
+        neighs_out = out_folder / 'NEIGHS' / way / cellref
+        neighs_out.mkdir(parents=True, exist_ok=True)
+        
+        t4 = datetime.datetime.now()
+        
+        if self.compute_neighbors == "True":
+            inputImg, pelt_filtered = self.run_neighbors(ds=pelt_output, filter_type=way)
+            t5 = datetime.datetime.now()
+            self._logger.info(f"Computing neighbors for {key} took: {t5-t4}")
             
-            t4 = datetime.datetime.now()
+            write_cog(inputImg.magnitude, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
+            write_cog(inputImg.ngbh_stdev, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_stdev.tif', overwrite=True, nodata=np.nan)
+            write_cog(inputImg.ngbh_count, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif', overwrite=True, nodata=np.nan)
+            write_cog(pelt_filtered.date, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_date.tif', overwrite=True, nodata=np.nan)
+            write_cog(pelt_filtered.magnitude, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
+            if self.output["upload"] == "True":
+                self.upload_files(neighs_out)
+            self._logger.info("Neighbor computation complete")
+        else:
+            self.download_folder(neighs_out)
+            inputImg = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_magnitude.tif') \
+                .squeeze(drop=True) \
+                .to_dataset(name = 'magnitude', promote_attrs = True)
+            inputImg[['ngbh_stdev']] = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_stdev.tif') \
+                                            .squeeze(drop=True)
+            inputImg[['ngbh_count']] = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif') \
+                                            .squeeze(drop=True)
+            inputImg.attrs = dataset.attrs
+            for var in inputImg.variables:
+                inputImg[var].attrs = dataset.attrs
+
+            pelt_filtered = rioxarray.open_rasterio(neighs_out / f'filtered_id{self.id_:03}_{cellref}_magnitude.tif') \
+                .squeeze(drop=True) \
+                .to_dataset(name = 'magnitude', promote_attrs = True)
+            pelt_filtered[["date"]] = rioxarray.open_rasterio(neighs_out / f'filtered_id{self.id_:03}_{cellref}_date.tif') \
+                .squeeze(drop=True)
+            pelt_filtered.attrs = dataset.attrs
+            for var in pelt_filtered.variables:
+                pelt_filtered[var].attrs = dataset.attrs
+            self._logger.info("Neighbor files loaded from S3")
+
+        glcm_out = out_folder / 'GLCM' / way / cellref
+        glcm_out.mkdir(parents=True, exist_ok=True)
+        
+        t6 = datetime.datetime.now()
+        if self.compute_textures == 'True':
+            inputImg, glcm = self.run_textures(inputImg, pelt_filtered)
+            t7 = datetime.datetime.now()
+            self._logger.info(f"Computing textures for {key} took: {t7-t6}")
+
+            for prop in glcm['prop'].values:
+                write_cog(glcm.sel({'prop': prop}), fname=f"{str(glcm_out)}/glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif", overwrite=True, nodata=np.nan)
             
-            if self.compute_neighbors == "True":
-                inputImg, pelt_filtered = self.run_neighbors(ds=pelt_output)
-                t5 = datetime.datetime.now()
-                self._logger.info(f"Computing neighbors for {key} took: {t5-t4}")
-                
-                write_cog(inputImg.magnitude, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
-                write_cog(inputImg.ngbh_stdev, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_stdev.tif', overwrite=True, nodata=np.nan)
-                write_cog(inputImg.ngbh_count, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif', overwrite=True, nodata=np.nan)
-                write_cog(pelt_filtered.date, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_date.tif', overwrite=True, nodata=np.nan)
-                write_cog(pelt_filtered.magnitude, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
-                if self.output["upload"] == "True":
-                    self.upload_files(neighs_out)
-                self._logger.info("Neighbor computation complete")
-            else:
-                self.download_folder(neighs_out)
-                inputImg = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_magnitude.tif') \
-                    .squeeze(drop=True) \
-                    .to_dataset(name = 'magnitude', promote_attrs = True)
-                inputImg[['ngbh_stdev']] = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_stdev.tif') \
-                                                .squeeze(drop=True)
-                inputImg[['ngbh_count']] = rioxarray.open_rasterio(neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif') \
-                                                .squeeze(drop=True)
-                inputImg.attrs = dataset.attrs
-                for var in inputImg.variables:
-                    inputImg[var].attrs = dataset.attrs
+            if self.output["upload"] == "True":
+                self.upload_files(glcm_out)
 
-                pelt_filtered = rioxarray.open_rasterio(neighs_out / f'filtered_id{self.id_:03}_{cellref}_magnitude.tif') \
-                    .squeeze(drop=True) \
-                    .to_dataset(name = 'magnitude', promote_attrs = True)
-                pelt_filtered[["date"]] = rioxarray.open_rasterio(neighs_out / f'filtered_id{self.id_:03}_{cellref}_date.tif') \
-                    .squeeze(drop=True)
-                pelt_filtered.attrs = dataset.attrs
-                for var in pelt_filtered.variables:
-                    pelt_filtered[var].attrs = dataset.attrs
-                self._logger.info("Neighbor files loaded from S3")
+            # simages.write_to_cogs(glcm, dim = "prop", fname = glcm_out / f"glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif")
+            inputImg = xr.merge([inputImg, glcm.to_dataset(dim="prop", promote_attrs=True)])
+            for var in inputImg.variables:
+                inputImg[var].attrs = dataset.attrs
+            self._logger.info("Texture computation complete")
+        else:
+            textures_names = ['asm', 'contrast', 'corr', 'var', 'idm', 'savg', 'entropy']
+            textures_names.sort()
+            self.download_folder(glcm_out)
+            fls = list(glcm_out.glob("**/*"))
+            fls.sort()
+            tex_ = [rioxarray.open_rasterio(f) for f in fls if f.name.endswith(".tif")]
+            glcm = xr.concat(tex_, dim="band").rename({"band": "prop"}).transpose("y", "x", "prop")
+            glcm["prop"] = textures_names
+            inputImg = xr.merge([inputImg, glcm.to_dataset(dim="prop", promote_attrs=True)])
+            for var in inputImg.variables:
+                inputImg[var].attrs = dataset.attrs
+            self._logger.info("Texture files loaded from S3")
 
-            glcm_out = out_folder / 'GLCM' / way / cellref
-            glcm_out.mkdir(parents=True, exist_ok=True)
+        inputImg = inputImg.compute()
+        rf_out = out_folder / 'RF' / way / cellref
+        rf_out.mkdir(parents=True, exist_ok=True)
+        t8 = datetime.datetime.now()
+
+        if self.compute_rf == "True":   
+            sam_bool, sam_mgs, sam_dates = self.run_rf(inputImg, pelt_filtered)
+            t9 = datetime.datetime.now()
+            self._logger.info(f"Computing random forest for {key} took: {t9-t8}")
+
+            # Remove extra buffer pixels before saving
+            pad = int(self.tile_buffer[0]/30)
+            sam_bool = sam_bool.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+            sam_mgs = sam_mgs.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+            sam_dates = sam_dates.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+
+            # Put the product list into its own dataset
+            products=ds_product.to_dataset(name='product')
+            # Add simple integer product numbering
+            products['product_num'] = xr.where(products.product=='landsat9_c2l2_sr',9,np.nan).astype('float32')
+            products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',8,products.product_num)
+            products['product_num'] = xr.where(products.product=='landsat7_c2l2_sr',7,products.product_num)
+            products['product_num'] = xr.where(products.product=='landsat5_c2l2_sr',5,products.product_num)
             
-            t6 = datetime.datetime.now()
-            if self.compute_textures == 'True':
-                inputImg, glcm = self.run_textures(inputImg, pelt_filtered)
-                t7 = datetime.datetime.now()
-                self._logger.info(f"Computing textures for {key} took: {t7-t6}")
+            # Match the dates to find the satellite product for each pixel and get rid of any unnecessary dimensions and variables
+            sam_products = products.product_num.where(((products.time.astype(int)*1e-9).astype(int) == sam_dates)).max('time').squeeze().astype('float32')
 
-                for prop in glcm['prop'].values:
-                    write_cog(glcm.sel({'prop': prop}), fname=f"{str(glcm_out)}/glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif", overwrite=True, nodata=np.nan)
-                
-                if self.output["upload"] == "True":
-                    self.upload_files(glcm_out)
+            nname = self.rf_params['rf_model'].split('.')[0]
+            write_cog(
+                geo_im = sam_bool,
+                fname = rf_out / f"sam_bool_{nname}_{way}_{cellref}.tif",
+                overwrite = True,
+                nodata = 255,
+                compress='LZW'
+            )
 
-                # simages.write_to_cogs(glcm, dim = "prop", fname = glcm_out / f"glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif")
-                inputImg = xr.merge([inputImg, glcm.to_dataset(dim="prop", promote_attrs=True)])
-                for var in inputImg.variables:
-                    inputImg[var].attrs = dataset.attrs
-                self._logger.info("Texture computation complete")
-            else:
-                textures_names = ['asm', 'contrast', 'corr', 'var', 'idm', 'savg', 'entropy']
-                textures_names.sort()
-                self.download_folder(glcm_out)
-                fls = list(glcm_out.glob("**/*"))
-                fls.sort()
-                tex_ = [rioxarray.open_rasterio(f) for f in fls if f.name.endswith(".tif")]
-                glcm = xr.concat(tex_, dim="band").rename({"band": "prop"}).transpose("y", "x", "prop")
-                glcm["prop"] = textures_names
-                inputImg = xr.merge([inputImg, glcm.to_dataset(dim="prop", promote_attrs=True)])
-                for var in inputImg.variables:
-                    inputImg[var].attrs = dataset.attrs
-                self._logger.info("Texture files loaded from S3")
+            write_cog(
+                geo_im = sam_mgs,
+                fname = rf_out / f"sam_mgs_{nname}_{way}_{cellref}.tif",
+                overwrite = True,
+                nodata = np.nan,
+                compress='LZW'
+            )
 
-            inputImg = inputImg.compute()
-            rf_out = out_folder / 'RF' / way / cellref
-            rf_out.mkdir(parents=True, exist_ok=True)
-            t8 = datetime.datetime.now()
+            write_cog(
+                geo_im = sam_dates,
+                fname = rf_out / f"sam_dates_{nname}_{way}_{cellref}.tif",
+                overwrite = True,
+                nodata = 0,
+                compress='LZW'
+            )
 
-            if self.compute_rf == "True":   
-                sam_bool, sam_mgs, sam_dates = self.run_rf(inputImg, pelt_filtered)
-                t9 = datetime.datetime.now()
-                self._logger.info(f"Computing random forest for {key} took: {t9-t8}")
+            write_cog(
+                geo_im = sam_products,
+                fname = rf_out / f"sam_products_{nname}_{way}_{cellref}.tif",
+                overwrite = True,
+                nodata = 0,
+                compress='LZW'
+            )
 
-                # Remove extra buffer pixels before saving
-                pad = int(self.tile_buffer[0]/30)
-                sam_bool = sam_bool.isel(x=slice(pad,-pad),y=slice(pad,-pad))
-                sam_mgs = sam_mgs.isel(x=slice(pad,-pad),y=slice(pad,-pad))
-                sam_dates = sam_dates.isel(x=slice(pad,-pad),y=slice(pad,-pad))
+            dataset_trimmed = dataset.isel(x=slice(pad,-pad),y=slice(pad,-pad)).ndvi.compute()
 
-                # Put the product list into its own dataset
-                products=ds_product.to_dataset(name='product')
-                # Add simple integer product numbering
-                products['product_num'] = xr.where(products.product=='landsat9_c2l2_sr',9,np.nan).astype('float32')
-                products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',8,products.product_num)
-                products['product_num'] = xr.where(products.product=='landsat7_c2l2_sr',7,products.product_num)
-                products['product_num'] = xr.where(products.product=='landsat5_c2l2_sr',5,products.product_num)
-                
-                # Match the dates to find the satellite product for each pixel and get rid of any unnecessary dimensions and variables
-                sam_products = products.product_num.where(((products.time.astype(int)*1e-9).astype(int) == sam_dates)).max('time').squeeze().astype('float32')
+            # Get the dates of the changes
+            change_dates = sam_dates.where(sam_dates != 0)
+            # Save current timestamp
+            now_ts = datetime.datetime.timestamp(datetime.datetime.now())
+            # Get the last change date
+            ts = change_dates.max().values.item()
+            
+            # Create an empty Dataset with the same shape as the input data
+            post_break = xr.full_like(dataset_trimmed.isel(time=0),fill_value=int(now_ts),dtype=int)
+            post_break = post_break.rename('ts').drop('time')
+            post_break = post_break.to_dataset()
+            post_break['product'] = xr.full_like(dataset_trimmed.isel(time=0),fill_value=0,dtype=int)
 
-                nname = self.rf_params['rf_model'].split('.')[0]
-                write_cog(
-                    geo_im = sam_bool,
-                    fname = rf_out / f"sam_bool_{nname}_{way}_{cellref}.tif",
-                    overwrite = True,
-                    nodata = 255,
-                    compress='LZW'
-                )
+            # Loop through the dates in reverse order to find the first good pixel which is more recent than the change date
+            for dt in dataset_trimmed.time.values[::-1]:    
+                t = (dt.astype(int)*1e-09).astype(int)
+                temp_ = xr.where((~dataset_trimmed.sel(time=dt).isnull()) & (t>change_dates),t,post_break.ts)
+                post_break['ts'] = xr.where(temp_ < post_break.ts,temp_,post_break.ts)
+            
+            # Clean up the data to replace the now_ts value with 0
+            post_break = xr.where(post_break==int(now_ts),0,post_break)
 
-                write_cog(
-                    geo_im = sam_mgs,
-                    fname = rf_out / f"sam_mgs_{nname}_{way}_{cellref}.tif",
-                    overwrite = True,
-                    nodata = np.nan,
-                    compress='LZW'
-                )
+            # Get a list of all the unique timestamps
+            timestamps=np.unique(post_break.ts.values.flatten())
+            timestamps=timestamps[timestamps!=0]
 
-                write_cog(
-                    geo_im = sam_dates,
-                    fname = rf_out / f"sam_dates_{nname}_{way}_{cellref}.tif",
-                    overwrite = True,
-                    nodata = 0,
-                    compress='LZW'
-                )
+            # Loop through the new timestamps and find the product for each pixel
+            for t in timestamps:
+                dt = datetime.datetime.fromtimestamp(t).isoformat()
+                p = products.product_num.sel(time=dt).min().values.item()
+                # product_num = np.int8(re.compile('^landsat(\d{1})_c2l2_sr$').match(p).group(1))
+                post_break['product'] = xr.where(post_break.ts==t,p,post_break.product).astype('float32')
+            
+            # Clean up the data by removing zeros
+            post_break=post_break.where(post_break!=0)#.astype('float32')
 
-                write_cog(
-                    geo_im = sam_products,
-                    fname = rf_out / f"sam_products_{nname}_{way}_{cellref}.tif",
-                    overwrite = True,
-                    nodata = 0,
-                    compress='LZW'
-                )
+            for var in post_break.variables:
+                post_break[var].attrs = dataset.attrs
 
-                dataset_trimmed = dataset.isel(x=slice(pad,-pad),y=slice(pad,-pad)).ndvi.compute()
+            write_cog(
+                geo_im = post_break.ts,
+                fname = rf_out / f"sam_post_dates_{nname}_{way}_{cellref}.tif",
+                overwrite = True,
+                nodata = 0,
+                compress='LZW'
+            )
 
-                # Get the dates of the changes
-                change_dates = sam_dates.where(sam_dates != 0)
-                # Save current timestamp
-                now_ts = datetime.datetime.timestamp(datetime.datetime.now())
-                # Get the last change date
-                ts = change_dates.max().values.item()
-                
-                # Create an empty Dataset with the same shape as the input data
-                post_break = xr.full_like(dataset_trimmed.isel(time=0),fill_value=int(now_ts),dtype=int)
-                post_break = post_break.rename('ts').drop('time')
-                post_break = post_break.to_dataset()
-                post_break['product'] = xr.full_like(dataset_trimmed.isel(time=0),fill_value=0,dtype=int)
+            write_cog(
+                geo_im = post_break.product,
+                fname = rf_out / f"sam_post_products_{nname}_{way}_{cellref}.tif",
+                overwrite = True,
+                nodata = 0,
+                compress='LZW'
+            )
 
-                # Loop through the dates in reverse order to find the first good pixel which is more recent than the change date
-                for dt in dataset_trimmed.time.values[::-1]:    
-                    t = (dt.astype(int)*1e-09).astype(int)
-                    temp_ = xr.where((~dataset_trimmed.sel(time=dt).isnull()) & (t>change_dates),t,post_break.ts)
-                    post_break['ts'] = xr.where(temp_ < post_break.ts,temp_,post_break.ts)
-                
-                # Clean up the data to replace the now_ts value with 0
-                post_break = xr.where(post_break==int(now_ts),0,post_break)
-
-                # Get a list of all the unique timestamps
-                timestamps=np.unique(post_break.ts.values.flatten())
-                timestamps=timestamps[timestamps!=0]
-
-                # Loop through the new timestamps and find the product for each pixel
-                for t in timestamps:
-                    dt = datetime.datetime.fromtimestamp(t).isoformat()
-                    p = products.product_num.sel(time=dt).min().values.item()
-                    # product_num = np.int8(re.compile('^landsat(\d{1})_c2l2_sr$').match(p).group(1))
-                    post_break['product'] = xr.where(post_break.ts==t,p,post_break.product).astype('float32')
-                
-                # Clean up the data by removing zeros
-                post_break=post_break.where(post_break!=0)#.astype('float32')
-
-                for var in post_break.variables:
-                    post_break[var].attrs = dataset.attrs
-
-                write_cog(
-                    geo_im = post_break.ts,
-                    fname = rf_out / f"sam_post_dates_{nname}_{way}_{cellref}.tif",
-                    overwrite = True,
-                    nodata = 0,
-                    compress='LZW'
-                )
-
-                write_cog(
-                    geo_im = post_break.product,
-                    fname = rf_out / f"sam_post_products_{nname}_{way}_{cellref}.tif",
-                    overwrite = True,
-                    nodata = 0,
-                    compress='LZW'
-                )
-
-                if self.output["upload"] == "True":
-                    self.upload_files(rf_out)
-                self._logger.info("RF computation complete")
+            if self.output["upload"] == "True":
+                self.upload_files(rf_out)
+            self._logger.info("RF computation complete")
 
         self._logger.info(f"    Done. {key} with shape {dataset.ndvi.shape} took: {datetime.datetime.now()-t0}")
 

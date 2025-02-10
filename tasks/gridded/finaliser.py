@@ -159,7 +159,11 @@ class Assemble(ArgoTask):
         dates = list(chunks(dates,10)) # Process 10 days at a time
         
         if get_dates_only:
-            return dates       
+            with open('/tmp/dates_idx', 'w') as outfile:
+              json.dump(list(range(0,len(dates))),outfile)
+              
+            with open('/tmp/dates','w') as outfile:
+              json.dump(dates, outfile)
         
         # Function to count neighbours based on a rolling window and a given number of days
         def count_neighbours(data,days=1):
@@ -282,9 +286,6 @@ class Assemble(ArgoTask):
 
         with open('/tmp/dates','w') as outfile:
             json.dump(dates, outfile)
-
-        with open('/tmp/way', 'w') as outfile:
-            outfile.write([f.name for f in os.scandir(path) if f.is_dir()][0])
 
         return ds, sam_timestamps
 
@@ -420,7 +421,7 @@ class Finalise(ArgoTask):
             match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
             rf_version = match['rf_version']
 
-            out_path = Path(self.temp_dir.name) / "dcc_format" / rf_version / self.way
+            out_path = Path(self.temp_dir.name) / "dcc_format" / rf_version / self.neighbor_params['way']
             filename = "break000"
 
             # TODO: CHANGE TO DAY - should write out days not timestamps
