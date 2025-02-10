@@ -316,115 +316,117 @@ class Finalise(ArgoTask):
         # Clean up memory before starting
         gc.collect()
 
+        # Download data
+        bucket = self.output["bucket"]
+        prefix = str(Path(self.output['prefix']) / 'final')
+        dt_format = '%Y%m%d'
+        max_date, second_date = get_most_recent_dates(bucket, prefix, dt_format)
+        max_date_str = max_date.strftime(dt_format)
+        path = Path(self.temp_dir.name)
+
+        self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{max_date_str} to {path / max_date_str}")
+        self.s3_download_folder(
+            prefix=f"{prefix}/{max_date_str}",
+            bucket=bucket,
+            path=str(path / max_date_str)
+        )
+        base_path = path
+        path = base_path / max_date_str
+        
+        # Get all the files for the most recent run
+        sam_bool = path.rglob('sam_bool*.tif')
+        sam_dates = path.rglob('sam_dates*.tif')
+        sam_mgs = path.rglob('sam_mgs*.tif')
+        sam_prod = path.rglob('sam_products*.tif')
+        sam_post_prod = path.rglob('sam_post_products*.tif')
+        sam_post_dates = path.rglob('sam_post_dates*.tif')
+        sam_rep_1d = path.rglob('sam_rep_1d_*.tif')
+        sam_rep_60d = path.rglob('sam_rep_60d_*.tif')
+        sam_areas_protegidas = path.rglob('sam_areas_protegidas_*.tif')
+        sam_sitios_prioritarios = path.rglob('sam_sitios_prioritarios_*.tif')
+        
+        # sam_mgs_2 = second_path.rglob('sam_mgs*.tif')
+        # sam_rep_1d_2 = second_path.rglob('sam_rep_1d_*.tif')
+        # sam_rep_60d_2 = second_path.rglob('sam_rep_60d_*.tif')
+        # sam_areas_protegidas_2 = second_path.rglob('sam_areas_protegidas_*.tif')
+        # sam_sitios_prioritarios_2 = second_path.rglob('sam_sitios_prioritarios_*.tif')
+
+        mgs = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
+        mgs = xr.combine_by_coords(mgs).compute()
+
+        dates_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_dates]
+        dates_data = xr.combine_by_coords(dates_data).compute()
+        sam_timestamps = dates_data.where(dates_data != 0)
+        del dates_data
+
+        # Function to convert timestamps to datetime - must be a 1-D array
+        def ts_to_datetime(arr):
+            return pd.to_datetime(arr, unit='s')
+
+        # sam_dates = xr.DataArray(pd.to_datetime(sam_timestamps*1e9, unit='ns').values,dims=['y','x'])
+        # Apply ts_to_datetime along the y-dimension
+        sam_dates = xr.apply_ufunc(
+            ts_to_datetime,
+            sam_timestamps,
+            input_core_dims=[['x']],
+            output_core_dims=['x'],
+            vectorize=True,
+        )
+
+        bool_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
+        bool_data = xr.combine_by_coords(bool_data).compute()
+
+        # bool_data_2 = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool_2]
+        # bool_data_2 = xr.combine_by_coords(bool_data_2).compute()
+
+        product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
+        product_data = xr.combine_by_coords(product_data).compute()
+
+        post_product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
+        post_product_data = xr.combine_by_coords(post_product_data).compute()
+
+        post_dates_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
+        post_dates_data = xr.combine_by_coords(post_dates_data).compute()
+
+        rep_1d_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_1d]
+        rep_1d_data = xr.combine_by_coords(rep_1d_data).compute()
+
+        rep_60d_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_60d]
+        rep_60d_data = xr.combine_by_coords(rep_60d_data).compute()
+
+        areas_protegidas_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_areas_protegidas]
+        areas_protegidas_data = xr.combine_by_coords(areas_protegidas_data).compute()
+
+        sitios_prioritarios_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_sitios_prioritarios]
+        sitios_prioritarios_data = xr.combine_by_coords(sitios_prioritarios_data).compute()
+
+        attrs = {'crs': 'epsg:32619', 'grid_mapping': 'spatial_ref'}
+
+        PATTERN = re.compile(r'^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
+        match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
+        rf_version = match['rf_version']
+
+        out_path = Path(self.temp_dir.name) / "dcc_format" / rf_version / self.neighbor_params['way']
+        filename = "break000"
+
+        if second_date: 
+            second_date_str = second_date.strftime(dt_format)
+            self._logger.info(f"Found a previous date to compare to: {second_date_str}")
+            self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{second_date_str} to {base_path / second_date_str}")
+            self.s3_download_folder(
+                prefix=f"{prefix}/{second_date_str}",
+                bucket=bucket,
+                path=str(base_path / second_date_str)
+            )
+
+            second_path = base_path / second_date_str
+            # Get the files for the second most recent run
+            sam_bool_2 = second_path.rglob('sam_bool*.tif')
+            # TODO: compare the two dates and get the differences - add to output for email
+
         for date in self.dates[int(self.dates_idx)]:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
             self._logger.info(f"Processing {date}")
-
-            # Download data
-            bucket = self.output["bucket"]
-            prefix = str(Path(self.output['prefix']) / 'final')
-            dt_format = '%Y%m%d'
-            max_date, second_date = get_most_recent_dates(bucket, prefix, dt_format)
-            max_date_str = max_date.strftime(dt_format)
-            path = Path(self.temp_dir.name)
-
-            self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{max_date_str} to {path / max_date_str}")
-            self.s3_download_folder(
-                prefix=f"{prefix}/{max_date_str}",
-                bucket=bucket,
-                path=str(path / max_date_str)
-            )
-            base_path = path
-            path = base_path / max_date_str
-
-            # Get all the files for the most recent run
-            sam_bool = path.rglob('sam_bool*.tif')
-            sam_dates = path.rglob('sam_dates*.tif')
-            sam_mgs = path.rglob('sam_mgs*.tif')
-            sam_prod = path.rglob('sam_products*.tif')
-            sam_post_prod = path.rglob('sam_post_products*.tif')
-            sam_post_dates = path.rglob('sam_post_dates*.tif')
-            sam_rep_1d = path.rglob('sam_rep_1d_*.tif')
-            sam_rep_60d = path.rglob('sam_rep_60d_*.tif')
-            sam_areas_protegidas = path.rglob('sam_areas_protegidas_*.tif')
-            sam_sitios_prioritarios = path.rglob('sam_sitios_prioritarios_*.tif')
-
-            if second_date: 
-                second_date_str = second_date.strftime(dt_format)
-                self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{second_date_str} to {base_path / second_date_str}")
-                self.s3_download_folder(
-                    prefix=f"{prefix}/{second_date_str}",
-                    bucket=bucket,
-                    path=str(base_path / second_date_str)
-                )
-
-                second_path = base_path / second_date_str
-                # Get the files for the second most recent run
-                sam_bool_2 = second_path.rglob('sam_bool*.tif')
-            # TODO: compare the two dates and get the differences - add to output for email
-            
-            # sam_mgs_2 = second_path.rglob('sam_mgs*.tif')
-            # sam_rep_1d_2 = second_path.rglob('sam_rep_1d_*.tif')
-            # sam_rep_60d_2 = second_path.rglob('sam_rep_60d_*.tif')
-            # sam_areas_protegidas_2 = second_path.rglob('sam_areas_protegidas_*.tif')
-            # sam_sitios_prioritarios_2 = second_path.rglob('sam_sitios_prioritarios_*.tif')
-
-            mgs = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_mgs]
-            mgs = xr.combine_by_coords(mgs).compute()
-
-            dates_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_dates]
-            dates_data = xr.combine_by_coords(dates_data).compute()
-            sam_timestamps = dates_data.where(dates_data != 0)
-            del dates_data
-
-            # Function to convert timestamps to datetime - must be a 1-D array
-            def ts_to_datetime(arr):
-                return pd.to_datetime(arr, unit='s')
-
-            # sam_dates = xr.DataArray(pd.to_datetime(sam_timestamps*1e9, unit='ns').values,dims=['y','x'])
-            # Apply ts_to_datetime along the y-dimension
-            sam_dates = xr.apply_ufunc(
-                ts_to_datetime,
-                sam_timestamps,
-                input_core_dims=[['x']],
-                output_core_dims=['x'],
-                vectorize=True,
-            )
-
-            bool_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
-            bool_data = xr.combine_by_coords(bool_data).compute()
-            # bool_data_2 = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool_2]
-            # bool_data_2 = xr.combine_by_coords(bool_data_2).compute()
-
-            product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
-            product_data = xr.combine_by_coords(product_data).compute()
-
-            post_product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_prod]
-            post_product_data = xr.combine_by_coords(post_product_data).compute()
-
-            post_dates_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_post_dates]
-            post_dates_data = xr.combine_by_coords(post_dates_data).compute()
-
-            rep_1d_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_1d]
-            rep_1d_data = xr.combine_by_coords(rep_1d_data).compute()
-
-            rep_60d_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_rep_60d]
-            rep_60d_data = xr.combine_by_coords(rep_60d_data).compute()
-
-            areas_protegidas_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_areas_protegidas]
-            areas_protegidas_data = xr.combine_by_coords(areas_protegidas_data).compute()
-
-            sitios_prioritarios_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_sitios_prioritarios]
-            sitios_prioritarios_data = xr.combine_by_coords(sitios_prioritarios_data).compute()
-
-            attrs = {'crs': 'epsg:32619', 'grid_mapping': 'spatial_ref'}
-
-            PATTERN = re.compile(r'^sam_\w*_(?P<filespec>RF_(?P<rf_version>v\w{2})_.*)_\w{8}.tif$')
-            match = PATTERN.match(next(path.rglob('sam_mgs*.tif')).name)
-            rf_version = match['rf_version']
-
-            out_path = Path(self.temp_dir.name) / "dcc_format" / rf_version / self.neighbor_params['way']
-            filename = "break000"
 
             # TODO: CHANGE TO DAY - should write out days not timestamps
             data_mgs = xr.where(sam_dates.dt.date == date, mgs, np.nan)
