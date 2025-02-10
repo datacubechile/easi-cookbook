@@ -164,6 +164,7 @@ class Assemble(ArgoTask):
               
             with open('/tmp/dates','w') as outfile:
               json.dump(dates, outfile)
+            return
         
         # Function to count neighbours based on a rolling window and a given number of days
         def count_neighbours(data,days=1):
