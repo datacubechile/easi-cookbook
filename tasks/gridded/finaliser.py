@@ -376,9 +376,6 @@ class Finalise(ArgoTask):
         bool_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool]
         bool_data = xr.combine_by_coords(bool_data).compute()
 
-        # bool_data_2 = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool_2]
-        # bool_data_2 = xr.combine_by_coords(bool_data_2).compute()
-
         product_data = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_prod]
         product_data = xr.combine_by_coords(product_data).compute()
 
@@ -423,6 +420,8 @@ class Finalise(ArgoTask):
             # Get the files for the second most recent run
             sam_bool_2 = second_path.rglob('sam_bool*.tif')
             # TODO: compare the two dates and get the differences - add to output for email
+            bool_data_2 = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool_2]
+            bool_data_2 = xr.combine_by_coords(bool_data_2).compute()
 
         for date in self.dates[int(self.dates_idx)]:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
