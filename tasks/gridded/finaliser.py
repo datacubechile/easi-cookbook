@@ -15,6 +15,7 @@ sys.path.insert(1, 'lib-samsara/src/')
 sys.path.insert(1, '.')
 
 import datetime
+from dateutil.relativedelta import relativedelta
 import numpy as np
 import pandas as pd
 import rioxarray
@@ -33,6 +34,7 @@ from datacube.utils.cog import write_cog
 from rasterio.features import rasterize
 
 from tasks.common import get_most_recent_dates
+from tasks import geohash as gh
 
 from tasks import samsara_prepare
 
@@ -320,7 +322,7 @@ class Finalise(ArgoTask):
         bucket = self.output["bucket"]
         prefix = str(Path(self.output['prefix']) / 'final')
         dt_format = '%Y%m%d'
-        max_date, second_date = get_most_recent_dates(bucket, prefix, dt_format)
+        max_date, prior_date = get_most_recent_dates(bucket, prefix, dt_format)
         max_date_str = max_date.strftime(dt_format)
         path = Path(self.temp_dir.name)
 
@@ -406,22 +408,47 @@ class Finalise(ArgoTask):
         out_path = Path(self.temp_dir.name) / "dcc_format" / rf_version / self.neighbor_params['way']
         filename = "break000"
 
-        if second_date: 
-            second_date_str = second_date.strftime(dt_format)
-            self._logger.info(f"Found a previous date to compare to: {second_date_str}")
-            self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{second_date_str} to {base_path / second_date_str}")
+        if prior_date: 
+            prior_date_str = prior_date.strftime(dt_format)
+            self._logger.info(f"Found a previous date to compare to: {prior_date_str}")
+            self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{prior_date_str} to {base_path / prior_date_str}")
             self.s3_download_folder(
-                prefix=f"{prefix}/{second_date_str}",
+                prefix=f"{prefix}/{prior_date_str}",
                 bucket=bucket,
-                path=str(base_path / second_date_str)
+                path=str(base_path / prior_date_str)
             )
 
-            second_path = base_path / second_date_str
+            prior_date_path = base_path / prior_date_str
             # Get the files for the second most recent run
-            sam_bool_2 = second_path.rglob('sam_bool*.tif')
-            # TODO: compare the two dates and get the differences - add to output for email
-            bool_data_2 = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_bool_2]
-            bool_data_2 = xr.combine_by_coords(bool_data_2).compute()
+            sam_dates_prior = prior_date_path.rglob('sam_dates*.tif')
+            sam_dates_data_prior = [rioxarray.open_rasterio(f).isel(band=0,drop=True) for f in sam_dates_prior]
+            sam_dates_data_prior = xr.combine_by_coords(sam_dates_data_prior).compute()
+            sam_dates_data_prior = sam_dates_data_prior.fillna(0) # fill NAs with 0s so that we get new dates
+            sam_timestamps_changed = sam_timestamps.where(sam_timestamps > sam_dates_data_prior) # Unlikely to be backward changes, but just in case, filter only to "more recent" changes
+            sam_timestamps_changed = sam_timestamps_changed.where(sam_timestamps_changed > (prior_date - relativedelta(years=1)).timestamp()) # Only return changes in the last 12 months
+            write_cog(sam_timestamps_changed.compute(), fname = prior_date_path / f'sam_timestamps_changed.tif', nodata=np.nan, overwrite=True)
+            
+            sam_dates_changed = xr.apply_ufunc(
+                ts_to_datetime,
+                sam_timestamps_changed,
+                input_core_dims=[['x']],
+                output_core_dims=['x'],
+                vectorize=True,
+            )
+            sam_changed_ds = sam_dates_changed.to_dataset(name='dates')
+            sam_changed_ds['mag'] = mgs.where(~np.isnan(sam_changed_ds.dates))
+            sam_changed_ds['rep_1d'] = rep_1d_data.where(~np.isnan(sam_changed_ds.dates))
+            sam_changed_ds['rep_60d'] = rep_60d_data.where(~np.isnan(sam_changed_ds.dates))
+            sam_changed_ds['rep_60d'] = rep_60d_data.where(~np.isnan(sam_changed_ds.dates))
+            sam_changed_ds['areas_protegidas'] = areas_protegidas_data.where(~np.isnan(sam_changed_ds.dates))
+            sam_changed_ds['sitios_prioritarios'] = sitios_prioritarios_data.where(~np.isnan(sam_changed_ds.dates))
+
+            sam_changed_ds = sam_changed_ds.where(~np.isnan(sam_changed_ds.dates), drop=True)
+            sam_changed_df = sam_changed_ds.to_dataframe().dropna()
+            sam_changed_df['geohash'] = list(map(gh.encode_from_xy, sam_changed_df.index.get_level_values('x'), sam_changed_df.index.get_level_values('y')))
+            
+            with open('/tmp/changes','w') as outfile:
+                json.dump(sam_changed_df.to_json(), outfile)
 
         for date in self.dates[int(self.dates_idx)]:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
