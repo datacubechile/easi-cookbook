@@ -449,6 +449,10 @@ class Finalise(ArgoTask):
             
             with open('/tmp/changes','w') as outfile:
                 json.dump(sam_changed_df.to_json(), outfile)
+            with open('/tmp/prior_date','w') as outfile:
+                outfile.write(prior_date_str)
+            with open('/tmp/max_date','w') as outfile:
+                outfile.write(max_date_str)
 
         for date in self.dates[int(self.dates_idx)]:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
