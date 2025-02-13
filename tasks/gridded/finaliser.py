@@ -446,11 +446,12 @@ class Finalise(ArgoTask):
             sam_changed_ds = sam_changed_ds.where(~np.isnan(sam_changed_ds.dates), drop=True)
             sam_changed_df = sam_changed_ds.to_dataframe().dropna()
             sam_changed_df['geohash'] = list(map(gh.encode_from_xy, sam_changed_df.index.get_level_values('x'), sam_changed_df.index.get_level_values('y')))
+            sam_changed_df = sam_changed_df.to_json()
         else:
             sam_changed_df = []
 
         with open('/tmp/changes','w') as outfile:
-            json.dump(sam_changed_df.to_json(), outfile)
+            json.dump(, outfile)
         with open('/tmp/prior_date','w') as outfile:
             outfile.write(prior_date_str)
         with open('/tmp/max_date','w') as outfile:
