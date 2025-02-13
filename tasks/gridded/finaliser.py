@@ -323,7 +323,8 @@ class Finalise(ArgoTask):
         prefix = str(Path(self.output['prefix']) / 'final')
         dt_format = '%Y%m%d'
         max_date, prior_date = get_most_recent_dates(bucket, prefix, dt_format)
-        max_date_str = max_date.strftime(dt_format)
+        max_date_str = max_date.strftime(dt_format) 
+        prior_date_str = prior_date.strftime(dt_format) if prior_date else ""
         path = Path(self.temp_dir.name)
 
         self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{max_date_str} to {path / max_date_str}")
@@ -408,8 +409,7 @@ class Finalise(ArgoTask):
         out_path = Path(self.temp_dir.name) / "dcc_format" / rf_version / self.neighbor_params['way']
         filename = "break000"
 
-        if prior_date: 
-            prior_date_str = prior_date.strftime(dt_format)
+        if prior_date:
             self._logger.info(f"Found a previous date to compare to: {prior_date_str}")
             self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{prior_date_str} to {base_path / prior_date_str}")
             self.s3_download_folder(
@@ -447,12 +447,12 @@ class Finalise(ArgoTask):
             sam_changed_df = sam_changed_ds.to_dataframe().dropna()
             sam_changed_df['geohash'] = list(map(gh.encode_from_xy, sam_changed_df.index.get_level_values('x'), sam_changed_df.index.get_level_values('y')))
             
-            with open('/tmp/changes','w') as outfile:
-                json.dump(sam_changed_df.to_json(), outfile)
-            with open('/tmp/prior_date','w') as outfile:
-                outfile.write(prior_date_str)
-            with open('/tmp/max_date','w') as outfile:
-                outfile.write(max_date_str)
+        with open('/tmp/changes','w') as outfile:
+            json.dump(sam_changed_df.to_json(), outfile)
+        with open('/tmp/prior_date','w') as outfile:
+            outfile.write(prior_date_str)
+        with open('/tmp/max_date','w') as outfile:
+            outfile.write(max_date_str)
 
         for date in self.dates[int(self.dates_idx)]:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()

@@ -215,6 +215,17 @@ spec:
             value: "{{workflow.parameters.package-path}}"
           - name: package-secret
             value: "{{workflow.parameters.package-secret}}"
+    - - name: emailer
+        template: emailer
+        arguments:
+          parameters:
+            - name: max_date
+              value: "{{steps.finaliser.outputs.parameters.max_date}}"
+            - name: prior_date
+              value: "{{steps.finaliser.outputs.parameters.prior_date}}"
+          artifacts:
+            - name: changes
+              from: "{{steps.finaliser.outputs.artifacts.changes}}"
 
 ##--------------------------------
   - name: tile-generator
@@ -402,10 +413,10 @@ spec:
           mountPath: "{{inputs.parameters.package-path}}"
       resources: # limit the resources
         limits:
-          memory: 26Gi
+          memory: 24Gi
           cpu: 7000m
         requests:
-          memory: 26Gi
+          memory: 24Gi
           cpu: 7000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
@@ -567,6 +578,17 @@ spec:
       artifacts:
       - name: dates
         path: /tmp/dates
+    outputs:
+      parameters:
+      - name: max_date
+        valueFrom:
+          path: /tmp/max_date
+      - name: prior_date
+        valueFrom:
+          path: /tmp/prior_date
+      artifacts:
+      - name: changes
+        path: /tmp/changes
 
     retryStrategy:
       limit: "3"
@@ -778,7 +800,258 @@ spec:
             summariser.summarise()
           else:
             logging.info("Skipping summarising.")
+
+  - name: emailer
+    inputs:
+      parameters:
+      - name: prior_date
+      - name: max_date
+      artifacts:
+      - name: changes
+        path: /tmp/changes
       
+    retryStrategy:
+      limit: "3"
+      retryPolicy: "Always"
+    script:
+      image: python:3.12-alpine
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: SMTP_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: easi-smtp-server-credentials
+              key: SMTP_USERNAME
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: easi-smtp-server-credentials
+              key: SMTP_PASSWORD
+        - name: SMTP_SERVER
+          valueFrom:
+            secretKeyRef:
+              name: easi-smtp-server-credentials
+              key: SMTP_SERVER
+        - name: SMTP_PORT
+          valueFrom:
+            secretKeyRef:
+              name: easi-smtp-server-credentials
+              key: SMTP_PORT
+      resources: # limit the resources
+        limits:
+          memory: 2Gi
+          cpu: 1000m
+        requests:
+          memory: 2Gi
+          cpu: 1000m
+      command: [python]
+      source: |
+        import smtplib
+        import ssl
+        from email.message import EmailMessage
+        import pandas as pd
+        import numpy as np
+        import datetime
+        from babel.dates import format_date
+        from io import StringIO
+        from pyproj import Transformer
+        import ast
+        import base64
+        import requests
+        import time
+        
+        with open('/tmp/changes', "r") as f:
+            changes = StringIO(json.load(f))
+
+        # with open('/tmp/prior_date', "r") as f:
+        #     prior_date = datetime.datetime.strptime(f.read(),'%Y%m%d')
+
+        # with open('/tmp/max_date', "r") as f:
+        #     max_date = datetime.datetime.strptime(f.read(),'%Y%m%d')
+
+        prior_date = "{{inputs.parameters.prior_date}}"
+        max_date = "{{inputs.parameters.max_date}}"
+            
+        if len(changes) == 0:
+            raise Exception("No changes were found, /tmp/changes was empty.")
+            
+        if len(prior_date) == 0:
+            raise Exception("Prior date was not found, /tmp/prior_date was empty.")
+
+        if len(max_date) == 0:
+            raise Exception("Current date not found, /tmp/max_date was empty.")
+
+        changes = pd.read_json(changes).sort_values(by=['dates'], ascending=False)
+        prior_date = datetime.datetime.strptime(prior_date,'%Y%m%d')
+        max_date = datetime.datetime.strptime(max_date,'%Y%m%d')
+        
+        def bool_to_tick(val):
+            if val == 1:
+                return "✔"
+            else:
+                return ""
+        
+        make_maps = True
+        
+        def generate_map_url(marker_lon, marker_lat, zoomed=False):
+            key = "pk_961b27b44ed64dbdb42c5599432c7658"
+            width = 150
+            height = 100
+            lng = -70.627
+            lat = -33.604
+            zoom = 5
+            style = "light"
+            scale = 1
+            markers = f"lat%3A{marker_lat}%2Clng%3A{marker_lon}"
+
+            if zoomed:
+                zoom = 11
+                lng = marker_lon
+                lat = marker_lat
+
+            url = f"https://api.journey.tech/v1/static-map?key={key}&width={width}&height={height}&lng={lng}&lat={lat}&zoom={zoom}&style={style}&scale={scale}&markers={markers}" if make_maps else ""
+            return url
+
+        def xy_to_ll(x, y, crs):
+            """
+            Converts x and y to latitude and longitude using defaults
+            :param x: x
+            :param y: y
+            :return: Latitude and longitude
+            """
+            transformer = Transformer.from_crs(crs, 'EPSG:4326', always_xy=True)
+
+            lon, lat = transformer.transform(x, y)
+
+            return lon, lat
+
+        msg = EmailMessage()
+        msg['Subject'] = f"SAMSARA - {format_date(max_date, 'd MMM YYYY', locale='es_CL')} - {len(changes)} cambio{'s'[:len(changes)^1]} detectado{'s'[:len(changes)^1]}"
+        msg['From'] = "samsara@datacubechile.cl"
+        msg['To'] = "samsara@datacubechile.cl"
+        msg['Bcc'] = ["jonathan.hodge@uai.cl","hodge.jonathan@gmail.com"]
+        
+        # TODO: FIX THIS LINE
+        msg.set_content("""\
+        Este correo contiene información en formato HTML. No es posible visualizarlo en texto sin formato.
+        """)
+
+        html_head = """\
+        <html>
+            <head>
+            <style type="text/css">
+                table  {border-collapse:collapse;border-color:#ccc;border-spacing:0;}
+                table td{background-color:#fff;border-color:#ccc;border-style:solid;border-width:1px;color:#333;
+                font-family:Arial, sans-serif;font-size:14px;overflow:hidden;padding:10px 5px;word-break:normal;}
+                table th{background-color:#f0f0f0;border-color:#ccc;border-style:solid;border-width:1px;color:#333;
+                font-family:Arial, sans-serif;font-size:14px;font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}
+                table .head-left{border-color:#9b9b9b;text-align:left;vertical-align:middle}
+                table .head-center{border-color:#9b9b9b;text-align:center;vertical-align:middle}
+                table .row-center{text-align:center;vertical-align:middle}
+                table .row-left{text-align:left;vertical-align:middle}
+                table tr.colour td {background-color: #efffff;}
+                table tr.white td {background-color: white;}
+            </style>
+            </head>
+            """
+        html_start = f"""\
+            <body>
+                <h3>SAMSARA reporte {format_date(max_date, 'd MMMM YYYY', locale='es_CL')}</h3>
+                
+                <p>Durante los ultimos 12 meses, se encontr{'ó' if len(changes) == 1 else 'aron'} <strong>{len(changes)} cambio{'s'[:len(changes)^1]}</strong></p>
+                <div>
+                    <table class="summary-table">
+                        <tbody>
+                            <tr>
+                                <th class="head-left">Fecha de análisis anterior</th>
+                                <td>{format_date(prior_date, 'long', locale='es_CL')}</td>
+                            </tr>
+                            <tr>
+                                <th class="head-left">Fecha de análisis actual</th>
+                                <td>{format_date(max_date, 'long', locale='es_CL')}</td>
+                            </tr>
+                            <tr>
+                                <th class="head-left">Numero de cambios detectados</th>
+                                <td>{len(changes)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p>Cambios detectados podrían incluir nuevos pixeles al lado de cambios detectados anteriormente.</p>
+                </div>
+                <div>
+                    <table class="detail-table">
+                        <thead>
+                            <tr>
+                                <th class="head-left">Fecha</th>
+                                <th class="head-center">Magnitud</th>
+                                <th class="head-center">Área protegida</th>
+                                <th class="head-center">Área prioritaria</th>
+                                <th class="head-center">Vecinos (1 día)</th>
+                                <th class="head-center">Vecinos (60 días)</th>
+                                <th class="head-left">Lugar</th>
+                                <th class="head-left">Enlaces</th>
+                            </tr>
+                        </thead>
+                        <tbody>"""
+        html_rows = []
+        row_date_pre = 0
+        tr_colour = True
+        for index, row in changes.iterrows(): 
+            dt = datetime.datetime.fromtimestamp(row['dates']/1000) # TODO: CHECK THIS
+            idx = ast.literal_eval(index)
+            lon, lat = xy_to_ll(idx[1], idx[0],'epsg:32619')
+
+            if row_date_pre != row['dates']:
+                tr_colour = not tr_colour
+
+            url = generate_map_url(lon, lat)
+            try:
+                r = requests.get(url)
+                time.sleep(1) # Just slow it down a bit
+                if r.status_code == 200:
+                    data_url = base64.b64encode(r.content).decode('utf-8')
+                    data_url = 'data:image/png;base64,' + data_url
+                else:
+                    print(f"Status code was not 200 for {url}")
+                    data_url=""
+            except requests.exceptions.RequestException as e:  # This is the correct syntax
+                raise SystemExit(e)
+
+            tr_class = "colour" if tr_colour else "white"
+            img_block = f'<img src="{data_url}">' if data_url else ""
+
+            html_rows.append(f"""
+                <tr class="{tr_class}">
+                    <td class="row-left">{dt.strftime('%d/%m/%Y')}</td>
+                    <td class="row-center">{np.round(row['mag'],2)}</td>
+                    <td class="row-center">{bool_to_tick(row['areas_protegidas'])}</td>
+                    <td class="row-center">{bool_to_tick(row['sitios_prioritarios'])}</td>
+                    <td class="row-center">{row['rep_1d'] if row['rep_1d'] > 0 else ""}</td>
+                    <td class="row-center">{row['rep_60d'] if row['rep_60d'] > 0 else ""}</td>
+                    <td class="row-center">{img_block}</td>
+                    <td class="row-left">
+                        <p><a href="https://samsara.apps.datacubechile.cl/Detalle?geo={row['geohash']}&dt={dt.strftime('%Y-%m-%d')}&zoom=16" target="_blank">Ver en SAMSARA</a></p>
+                        <p><a href="https://maps.google.com/maps/place/{lat},{lon}/@{lat},{lon},15z/data=!3m1!1e3" target="_blank">Ver en Google Maps</a></p>
+                    </td>
+                </tr>
+            """)
+            row_date_pre = row['dates']
+
+        html_end = "</tbody></table></div></body></html>"
+        html = html_head + html_start + "".join(html_rows) + html_end
+        msg.add_alternative(html, subtype='html')
+        msg.add_header('reply-to', 'jonathan.hodge@uai.cl')
+
+        server=os.getenv('SMTP_SERVER')
+        username=os.getenv('SMTP_USERNAME')'
+        password=os.getenv('SMTP_PASSWORD')
+
+        context = ssl.create_default_context()
+        server = smtplib.SMTP_SSL(server, SMTP_PORT, context=context)
+
+        server.login(username,password)
+        server.send_message(msg)
+
 ##--------------------------------
   # Exit handler templates
   # After the completion of the entrypoint template, the status of the
