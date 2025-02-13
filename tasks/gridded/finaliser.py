@@ -485,15 +485,6 @@ class Finalise(ArgoTask):
 
                 fname = mpath / f"{date.strftime('%Y%m%d')}_{filename}"
 
-                del data_mgs
-                del mgs
-                del product_data
-                del post_product_data
-                del post_dates_data
-                del rep_1d_data
-                del rep_60d_data
-                gc.collect()
-
                 self._logger.info("Writing final data")
                 write_cog(combined_ds.mgs, fname=f'{fname}_mag.tif', nodata=0, overwrite=True)
                 write_cog(combined_ds.product, fname=f'{fname}_product.tif', nodata=0, overwrite=True)
