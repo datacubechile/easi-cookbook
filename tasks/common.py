@@ -292,7 +292,6 @@ def calc_chunk(val, target):
 def get_most_recent_dates(bucket, prefix, dt_format='%Y%m%d'):
     if "s3" not in locals():
         s3 = boto3.client("s3")
-    # Upload the file
     try:
         if not prefix.endswith("/"):
             prefix = prefix + "/"
@@ -307,3 +306,23 @@ def get_most_recent_dates(bucket, prefix, dt_format='%Y%m%d'):
         logging.error(e)
         return False, False
     return max_date, second_date
+
+def get_prior_date(bucket, prefix, date_key, dt_format='%Y%m%d'):
+    if "s3" not in locals():
+        s3 = boto3.client("s3")
+    try:
+        if not prefix.endswith("/"):
+            prefix = prefix + "/"
+        objs = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
+        dates = [datetime.datetime.strptime(p['Prefix'].split("/")[-2],dt_format) for p in objs['CommonPrefixes']]
+        max_date = max(dates)
+
+        if max_date < date_key:
+            prior_date = max_date
+        else:
+            prior_date = ""
+
+    except (ClientError) as e:
+        logging.error(e)
+        return False, False
+    return prior_date
