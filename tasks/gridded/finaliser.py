@@ -451,7 +451,7 @@ class Finalise(ArgoTask):
             sam_changed_df = []
 
         with open('/tmp/changes','w') as outfile:
-            json.dump(, outfile)
+            json.dump(sam_changed_df, outfile)
         with open('/tmp/prior_date','w') as outfile:
             outfile.write(prior_date_str)
         with open('/tmp/max_date','w') as outfile:
