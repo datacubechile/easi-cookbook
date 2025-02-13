@@ -61,7 +61,7 @@ spec:
     - name: rf_params
       value: '{"compute_rf": "True", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
     - name: finaliser_params
-      value: '{"assemble": "True", "finalise": "False", "summarise": "False"}'
+      value: '{"assemble": "True", "finalise": "True", "summarise": "True"}'
     - name: dask_image # data-pipeline image to use for Pods
       value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -677,7 +677,6 @@ spec:
 
           logging.basicConfig(level=logging.INFO)
 
-          from tasks.gridded.finaliser import Assemble
           from tasks.gridded.finaliser import Finalise
 
           finaliser_params = {{workflow.parameters.finaliser_params}}
