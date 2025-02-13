@@ -293,7 +293,7 @@ class TileProcessor(ArgoTask):
     def run_rf(self, inputImg: Dataset, pelt_filtered: Dataset) -> (Dataset, Dataset, Dataset):
         rf_model = self.rf_params["rf_model"]
         prefix = Path(self.output["prefix"])
-        s3_download_file(str(prefix / rf_model),self.output['bucket'],self.temp_dir.name)
+        s3_download_file(str(prefix.parent / 'resources' / rf_model),self.output['bucket'],self.temp_dir.name)
         nname = rf_model.split(".")[0]
         classifier = joblib.load(self.temp_dir.name + '/' + rf_model)
 
@@ -305,7 +305,7 @@ class TileProcessor(ArgoTask):
         classified=classified.chunk({'x':500,'y':500})
 
         # filtrar por landcover especial y alinear a classified
-        s3_download_file(str(prefix / 'LC_union_4y7_cog_cleaned_2x1.tif'),self.output['bucket'],self.temp_dir.name)
+        s3_download_file(str(prefix.parent / 'resources' / 'LC_union_4y7_cog_cleaned_2x1.tif'),self.output['bucket'],self.temp_dir.name)
         lc_ = xr.load_dataset(self.temp_dir.name+"/LC_union_4y7_cog_cleaned_2x1.tif", engine="rasterio").band_data.squeeze()
         lc = lc_.rio.reproject(inputImg.rio.crs,
                             transform=inputImg.rio.transform(),
@@ -313,7 +313,7 @@ class TileProcessor(ArgoTask):
                             resampling = Resampling.nearest)
 
         # filtrar por region metropolitana
-        s3_download_file(str(prefix / 'region_metropolitana_simp_vectorised.geojson'),self.output['bucket'],self.temp_dir.name)
+        s3_download_file(str(prefix.parent / 'resources' / 'region_metropolitana_simp_vectorised.geojson'),self.output['bucket'],self.temp_dir.name)
         region = gpd.read_file(self.temp_dir.name+"/region_metropolitana_simp_vectorised.geojson")
         region = region.to_crs(inputImg.rio.crs)
         region_polys = [geometry for geometry in region.geometry]

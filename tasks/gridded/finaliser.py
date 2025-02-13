@@ -212,7 +212,7 @@ class Assemble(ArgoTask):
             return da
 
         # Download shapefiles
-        prefix = str(Path(self.output['prefix']) / 'areas_protegidas')
+        prefix = str(Path(self.output['prefix']).parent / 'resources' / 'areas_protegidas')
         tmp_path = Path(self.temp_dir.name) / 'areas_protegidas'
         self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {tmp_path}")
         self.s3_download_folder(
@@ -223,7 +223,7 @@ class Assemble(ArgoTask):
 
         areas_protegidas = classify_with_shapefile(bool_data.to_dataset(), tmp_path / 'Areas Protegidas_metropolitana.shp')
 
-        prefix = str(Path(self.output['prefix']) / 'sitios_prioritarios')
+        prefix = str(Path(self.output['prefix']).parent / 'resources' / 'sitios_prioritarios')
         tmp_path = Path(self.temp_dir.name) / 'sitios_prioritarios' 
         self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {tmp_path}")
         self.s3_download_folder(
