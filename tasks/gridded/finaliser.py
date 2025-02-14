@@ -235,8 +235,6 @@ class Assemble(ArgoTask):
         rep_1d = count_neighbours(rolling,days=1).where(sam_ts!=0) - 1 # Don't count the central pixel
         rep_60d = count_neighbours(rolling,days=60).where(sam_ts!=0) - 1 # Don't count the central pixel
         rep_60d = rep_60d-rep_1d
-        self._logger.debug("Closing local dask cluster")
-        self.close_client()
 
         dt_format = '%Y%m%d'
 
@@ -249,9 +247,9 @@ class Assemble(ArgoTask):
 
         if prior_date:
             self._logger.info(f"Found a previous date to compare to: {prior_date_str}")
-            self._logger.info(f"    Downloading s3://{bucket}/{prefix}/{prior_date_str} to {path / prior_date_str}")
+            self._logger.info(f"    Downloading s3://{bucket}/{self.output['prefix']}final/{prior_date_str} to {path / prior_date_str}")
             self.s3_download_folder(
-                prefix=f"{prefix}/{prior_date_str}",
+                prefix=f"{self.output['prefix']}final/{prior_date_str}/",
                 bucket=bucket,
                 path=str(path / prior_date_str)
             )
@@ -266,7 +264,7 @@ class Assemble(ArgoTask):
             sam_timestamps_changed = sam_timestamps_changed.where(sam_timestamps_changed > (prior_date - relativedelta(years=1)).timestamp()) # Only return changes in the last 12 months
             # write_cog(sam_timestamps_changed.compute(), fname = prior_date_path / f'sam_timestamps_changed.tif', nodata=np.nan, overwrite=True)
             # TODO: upload changed file
-
+            sam_timestamps_changed = sam_timestamps_changed.compute()
             sam_dates_changed = xr.apply_ufunc(
                 ts_to_datetime,
                 sam_timestamps_changed,
@@ -288,6 +286,8 @@ class Assemble(ArgoTask):
         else:
             sam_changed_df = []
 
+        self._logger.debug("Closing local dask cluster")
+        self.close_client()
         with open('/tmp/changes','w') as outfile:
             json.dump(sam_changed_df, outfile)
         with open('/tmp/prior_date','w') as outfile:
