@@ -2,7 +2,6 @@
 Example of geomedian calculation for a tile, using a local dask cluster.
 """
 import sys
-import re
 import logging
 import pickle
 import math
@@ -19,16 +18,12 @@ sys.path.insert(1, 'lib-samsara/src/')
 sys.path.insert(1, '.')
 
 import datetime
-import pandas as pd
-from dask.distributed import Client, LocalCluster, wait, as_completed
+from dask.distributed import Client, LocalCluster, wait
 from datacube import Datacube
-from datacube.api import GridWorkflow
 from datacube.utils.masking import make_mask, mask_invalid_data
-from eodatasets3 import DatasetPrepare
-from odc.algo import from_float, to_f32, xr_geomedian
+from odc.algo import to_f32
 from tasks.argo_task import ArgoTask
 from tasks.gridded.tile_generator import TileGenerator
-from xarray import Dataset, DataArray
 from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
 from dea_tools.classification import predict_xr
@@ -94,7 +89,7 @@ class TileProcessor(ArgoTask):
             self._client = None
             self._cluster = None
 
-    def load_from_grid(self, key: (int, int)) -> Dataset:
+    def load_from_grid(self, key: (int, int)) -> xr.Dataset:
         """Load data from grid flow."""
         
         def load_product(product, query, chunks):
@@ -153,7 +148,7 @@ class TileProcessor(ArgoTask):
             raise
         return combined
 
-    def mask(self, ds: Dataset) -> Dataset:
+    def mask(self, ds: xr.Dataset) -> xr.Dataset:
         """Mask clouds and no data in data based on `oa_fmask` values."""
         # Use datacube masking methods
         # https://docs.dea.ga.gov.au/notebooks/How_to_guides/Masking_data.html
@@ -170,7 +165,7 @@ class TileProcessor(ArgoTask):
 
         return cloud_free
 
-    def scale(self, ds: Dataset) -> Dataset:
+    def scale(self, ds: xr.Dataset) -> xr.Dataset:
         """Scale Landsat data before geomedian calculation.
 
         GA Landsat data is in the range [0, 10000] and needs scaling to [0.0,
@@ -178,7 +173,7 @@ class TileProcessor(ArgoTask):
         """
         return to_f32(ds, scale=self.SCALE, offset=-0.2)
 
-    def run_pelt(self, ds: Dataset) -> Dataset:
+    def run_pelt(self, ds: xr.Dataset) -> xr.Dataset:
         """Run PELT on the dataset."""
         # rupture parameters
         model = self.pelt_params['model']
@@ -226,7 +221,7 @@ class TileProcessor(ArgoTask):
 
         return fpelt
     
-    def run_neighbors(self, ds: Dataset, filter_type: str='last_negative') -> (Dataset, Dataset):
+    def run_neighbors(self, ds: xr.Dataset, filter_type: str='last_negative') -> (xr.Dataset, xr.Dataset):
         pelt_filtered = sfilter.filter_by_variable(ds, filter_type=filter_type, variable = 'magnitude').chunk({'x':200, 'y':200})
 
         date_std = sns.stats(pelt_filtered, stat = "std", kernel = int(self.neighbor_params['neighbor_radius']), variable = 'date')
@@ -246,7 +241,7 @@ class TileProcessor(ArgoTask):
         
         return inputImg, pelt_filtered
 
-    def run_textures(self, inputImg: Dataset, pelt_filtered: Dataset) -> (Dataset, DataArray):
+    def run_textures(self, inputImg: xr.Dataset, pelt_filtered: xr.Dataset) -> (xr.Dataset, xr.DataArray):
 
         target_chunk_size = 1024
         x_chunk = calc_chunk(inputImg.magnitude.shape[1],target_chunk_size)
@@ -290,7 +285,7 @@ class TileProcessor(ArgoTask):
         
         return inputImg, glcm
     
-    def run_rf(self, inputImg: Dataset, pelt_filtered: Dataset) -> (Dataset, Dataset, Dataset):
+    def run_rf(self, inputImg: xr.Dataset, pelt_filtered: xr.Dataset) -> (xr.Dataset, xr.Dataset, xr.Dataset):
         rf_model = self.rf_params["rf_model"]
         prefix = Path(self.output["prefix"])
         s3_download_file(str(prefix.parent / 'resources' / rf_model),self.output['bucket'],self.temp_dir.name)

@@ -351,7 +351,7 @@ class Finalise(ArgoTask):
 
         self._client = None
         self._cluster = None
-        self.dask_workers = 4 if not 'dask_workers' in names else self.dask_workers
+        self.dask_workers = 4 if 'dask_workers' not in names else self.dask_workers
 
         self.temp_dir = TemporaryDirectory()
 
