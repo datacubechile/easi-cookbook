@@ -78,6 +78,11 @@ class Assemble(ArgoTask):
         prefix = str(Path(self.output['prefix']) / 'predict/RF')
         path = Path(self.temp_dir.name)
 
+        dt_format = '%Y%m%d'
+
+        date_key = min(datetime.datetime.now(), datetime.datetime.strptime(self.roi["time_end"][:10],'%Y-%m-%d'))
+        date_key_str = date_key.strftime(dt_format)
+
         self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {path}")
         self.s3_download_folder(
             prefix=prefix,
@@ -155,6 +160,15 @@ class Assemble(ArgoTask):
 
             with open('/tmp/dates','w') as outfile:
                 json.dump(dates, outfile)
+
+            with open("/tmp/changes", "w") as outfile:
+                outfile.write([])
+
+            with open("/tmp/prior_date", "w") as outfile:
+                outfile.write("")
+
+            with open("/tmp/latest_date", "w") as outfile:
+                outfile.write(date_key_str)
             return
 
         # Function to count neighbours based on a rolling window and a given number of days
@@ -235,11 +249,6 @@ class Assemble(ArgoTask):
         rep_1d = count_neighbours(rolling,days=1).where(sam_ts!=0) - 1 # Don't count the central pixel
         rep_60d = count_neighbours(rolling,days=60).where(sam_ts!=0) - 1 # Don't count the central pixel
         rep_60d = rep_60d-rep_1d
-
-        dt_format = '%Y%m%d'
-
-        date_key = min(datetime.datetime.now(), datetime.datetime.strptime(self.roi["time_end"][:10],'%Y-%m-%d'))
-        date_key_str = date_key.strftime(dt_format)
 
         prior_date = get_prior_date(bucket, Path(self.output['prefix']) / 'final', date_key, dt_format)
         # latest_date, prior_date = get_most_recent_dates(bucket, prefix, dt_format)
@@ -358,13 +367,13 @@ class Finalise(ArgoTask):
         with open('/tmp/dates', "r") as f:
             self.dates = json.load(f)
 
-    def finalise(self) -> None:
+    def finalise(self, latest_date) -> None:
         # Clean up memory before starting
         gc.collect()
 
         # Download data
         bucket = self.output["bucket"]
-        prefix = str(Path(self.output['prefix']) / 'final')
+        prefix = str(Path(self.output['prefix']) / 'final' / latest_date)
         path = Path(self.temp_dir.name)
 
         self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {path}")

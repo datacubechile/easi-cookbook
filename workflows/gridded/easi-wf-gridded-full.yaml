@@ -189,6 +189,8 @@ spec:
             value: "{{workflow.parameters.neighbor_params}}"
           - name: dates_idx
             value: "{{item}}"
+          - name: latest_date
+            value: "{{steps.assembler.outputs.parameters.latest_date}}"
           - name: package-repo
             value: "{{workflow.parameters.package-repo}}"
           - name: package-branch
@@ -263,6 +265,12 @@ spec:
       artifacts:
       - name: product_cells
         path: /tmp/product_cells.pickle
+
+    tolerations:
+      - key: easi.csiro.au/dedicated
+        operator: Equal
+        effect: NoSchedule
+        value: data_pipelines
 
     # activeDeadlineSeconds: 300
     retryStrategy:
@@ -493,6 +501,12 @@ spec:
       - name: changes
         path: /tmp/changes
 
+    tolerations:
+      - key: easi.csiro.au/dedicated
+        operator: Equal
+        effect: NoSchedule
+        value: data_pipelines
+
     retryStrategy:
       limit: "3"
       retryPolicy: "Always"
@@ -572,8 +586,6 @@ spec:
           import json
           import logging
           from pathlib import Path
-          import time
-          time.sleep(24*60*60)
 
           package_path = "{{inputs.parameters.package-path}}"
           package_repo = "{{inputs.parameters.package-repo}}"
@@ -604,6 +616,7 @@ spec:
       - name: output
       - name: neighbor_params
       - name: dates_idx
+      - name: latest_date
       - name: package-repo          # A sidecar package repo
       - name: package-branch        # The sidecar package repo branch
       - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
@@ -611,6 +624,12 @@ spec:
       artifacts:
       - name: dates
         path: /tmp/dates
+
+    tolerations:
+      - key: easi.csiro.au/dedicated
+        operator: Equal
+        effect: NoSchedule
+        value: data_pipelines
 
     retryStrategy:
       limit: "3"
@@ -705,7 +724,7 @@ spec:
 
           if finaliser_params['finalise'] == 'True':
             finaliser = Finalise({{inputs.parameters}})
-            finaliser.finalise()
+            finaliser.finalise(latest_date={{inputs.parameters.latest_date}})
           else:
             logging.info("Skipping finalisation.")
 
@@ -717,6 +736,12 @@ spec:
       - name: package-branch        # The sidecar package repo branch
       - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
       - name: package-secret        # Git-credentials format, e.g. git-credentials: $(echo -n "https://username:password@dev.azure.com | base64)
+
+    tolerations:
+      - key: easi.csiro.au/dedicated
+        operator: Equal
+        effect: NoSchedule
+        value: data_pipelines
 
     retryStrategy:
       limit: "3"
@@ -830,6 +855,12 @@ spec:
       artifacts:
       - name: changes
         path: /tmp/changes
+
+    tolerations:
+      - key: easi.csiro.au/dedicated
+        operator: Equal
+        effect: NoSchedule
+        value: data_pipelines
       
     retryStrategy:
       limit: "3"
@@ -1038,7 +1069,7 @@ spec:
 
             tr_class = "colour" if tr_colour else "white"
             img_block = f'<img src="{data_url}">' if data_url else ""
-
+            # https://samsara.apps.datacubechile.cl/Detalle?geo={row['geohash']}&dt={dt.strftime('%Y-%m-%d')}&zoom=16
             html_rows.append(f"""
                 <tr class="{tr_class}">
                     <td class="row-left">{dt.strftime('%d/%m/%Y')}</td>
@@ -1049,7 +1080,7 @@ spec:
                     <td class="row-center">{row['rep_60d'] if row['rep_60d'] > 0 else ""}</td>
                     <td class="row-center">{img_block}</td>
                     <td class="row-left">
-                        <p><a href="https://samsara.apps.datacubechile.cl/Detalle?geo={row['geohash']}&dt={dt.strftime('%Y-%m-%d')}&zoom=16" target="_blank">Ver en SAMSARA</a></p>
+                        <p><a href="" target="_blank">Ver en SAMSARA</a></p>
                         <p><a href="https://maps.google.com/maps/place/{lat},{lon}/@{lat},{lon},15z/data=!3m1!1e3" target="_blank">Ver en Google Maps</a></p>
                     </td>
                 </tr>
