@@ -1,12 +1,14 @@
 import datetime
 import json
 import logging
+import math
 import sys
 import os
 
 import boto3
 import dateutil
 import geojson
+import pandas as pd
 from pathlib import Path
 from botocore.exceptions import ClientError
 
@@ -146,6 +148,17 @@ def process_order_params(order_params: dict, aws_region: str):
     datetime = [order_params["time_start"], order_params["time_end"]]
 
     return datetime, bounding_box, boundary
+
+
+def validate_json(o: dict) -> (bool, object):
+    """Validate a JSON string or dict"""
+    try:
+        if isinstance(o, dict):
+            o = json.dumps(o)
+        data = json.loads(o)
+    except (TypeError, AttributeError) as e:
+        return False, e
+    return True, data
 
 
 def validate_order(o: dict, aws_region: str = None) -> (bool, object):
@@ -289,25 +302,26 @@ def calc_chunk(val, target):
         res = option1 if (val/option1)%1 >= (val/option2)%1 else option2 # calculate best option if needed
     return res
 
-def get_most_recent_dates(bucket, prefix, dt_format='%Y%m%d'):
-    if "s3" not in locals():
-        s3 = boto3.client("s3")
-    try:
-        if not prefix.endswith("/"):
-            prefix = prefix + "/"
-        objs = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
-        dates = [datetime.datetime.strptime(p['Prefix'].split("/")[-2],dt_format) for p in objs['CommonPrefixes']]
-        # dates = [p['Prefix'].split("/")[-2] for p in objs['CommonPrefixes']]
-        max_date = max(dates)
-        dates.remove(max_date)
-        second_date = max(dates) if len(dates) != 0 else None
+# def get_most_recent_dates(bucket, prefix, dt_format='%Y%m%d'):
+#     if "s3" not in locals():
+#         s3 = boto3.client("s3")
+#     try:
+#         if not prefix.endswith("/"):
+#             prefix = prefix + "/"
+#         objs = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
+#         dates = [datetime.datetime.strptime(p['Prefix'].split("/")[-2],dt_format) for p in objs['CommonPrefixes']]
+#         # dates = [p['Prefix'].split("/")[-2] for p in objs['CommonPrefixes']]
+#         latest_date = max(dates)
+#         dates.remove(latest_date)
+#         second_date = max(dates) if len(dates) != 0 else None
 
-    except (ClientError) as e:
-        logging.error(e)
-        return False, False
-    return max_date, second_date
+#     except (ClientError) as e:
+#         logging.error(e)
+#         return False, False
+#     return latest_date, second_date
 
 def get_prior_date(bucket, prefix, date_key, dt_format='%Y%m%d'):
+    prefix = str(prefix)
     if "s3" not in locals():
         s3 = boto3.client("s3")
     try:
@@ -315,14 +329,18 @@ def get_prior_date(bucket, prefix, date_key, dt_format='%Y%m%d'):
             prefix = prefix + "/"
         objs = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
         dates = [datetime.datetime.strptime(p['Prefix'].split("/")[-2],dt_format) for p in objs['CommonPrefixes']]
-        max_date = max(dates)
+        latest_date = max(dates)
 
-        if max_date < date_key:
-            prior_date = max_date
+        if latest_date < date_key:
+            prior_date = latest_date
         else:
             prior_date = ""
 
     except (ClientError) as e:
         logging.error(e)
-        return False, False
+        return False
     return prior_date
+
+# Function to convert timestamps to datetime - must be a 1-D array
+def ts_to_datetime(arr):
+    return pd.to_datetime(arr, unit='s')
