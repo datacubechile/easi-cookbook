@@ -61,12 +61,12 @@ spec:
     - name: rf_params
       value: '{"compute_rf": "False", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
     - name: finaliser_params
-      value: '{"assemble": "True", "finalise": "True", "summarise": "False"}'
+      value: '{"assemble": "True", "finalise": "False", "summarise": "False"}'
     - name: dask_image # data-pipeline image to use for Pods
       value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
-    - name: wf_image            # Workflow image to use full image name
-      value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-workflows-base:2024.09.0"
+    # - name: wf_image            # Workflow image to use full image name
+    #   value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/easi-workflows-base:2024.09.0"
     # DEPLOYMENT
     - name: aws_region
       value: "us-west-2"
@@ -115,8 +115,8 @@ spec:
             value: "{{workflow.parameters.package-secret}}"
           - name: aws_region
             value: "{{workflow.parameters.aws_region}}"
-          - name: wf_image
-            value: "{{workflow.parameters.wf_image}}"
+          # - name: wf_image
+          #   value: "{{workflow.parameters.wf_image}}"
           - name: git_image
             value: "{{workflow.parameters.git_image}}"
 
@@ -158,7 +158,7 @@ spec:
           - name: product_cells
             from: "{{steps.tile-generator.outputs.artifacts.product_cells}}"
         withParam: "{{steps.tile-generator.outputs.parameters.keys}}"
-        when: "{{steps.tile-generator.outputs.parameters.processing_required}} == True"
+        when: "{{steps.tile-generator.outputs.parameters.process_required}} == True"
     - - name: assembler
         template: assembler
         arguments:
@@ -201,6 +201,7 @@ spec:
             - name: dates
               from: "{{steps.assembler.outputs.artifacts.dates}}"
         withParam: "{{steps.assembler.outputs.parameters.dates_idx}}"
+        when: "{{steps.tile-generator.outputs.parameters.finalise_required}} == True"
     - - name: summariser
         template: summariser
         arguments:
@@ -215,12 +216,13 @@ spec:
             value: "{{workflow.parameters.package-path}}"
           - name: package-secret
             value: "{{workflow.parameters.package-secret}}"
+        when: "{{steps.tile-generator.outputs.parameters.summarise_required}} == True"
     - - name: emailer
         template: emailer
         arguments:
           parameters:
-            - name: max_date
-              value: "{{steps.assembler.outputs.parameters.max_date}}"
+            - name: latest_date
+              value: "{{steps.assembler.outputs.parameters.latest_date}}"
             - name: prior_date
               value: "{{steps.assembler.outputs.parameters.prior_date}}"
           artifacts:
@@ -249,9 +251,15 @@ spec:
       - name: keys
         valueFrom:
           path: /tmp/keys.json
-      - name: processing_required
+      - name: process_required
         valueFrom:
-          path: /tmp/processing_required
+          path: /tmp/process_required
+      - name: finalise_required
+        valueFrom:
+          path: /tmp/finalise_required
+      - name: summarise_required
+        valueFrom:
+          path: /tmp/summarise_required
       artifacts:
       - name: product_cells
         path: /tmp/product_cells.pickle
@@ -334,11 +342,18 @@ spec:
         neighbor_params = {{workflow.parameters.neighbor_params}}
         texture_params = {{workflow.parameters.texture_params}}
         rf_params = {{workflow.parameters.rf_params}}
+        finaliser_params = {{workflow.parameters.finaliser_params}}
 
-        processing_required = str(pelt_params['compute_pelt'] == 'True' or neighbor_params['compute_neighbors'] == 'True' or texture_params['compute_textures'] == 'True' or rf_params['compute_rf'] == 'True')
+        process_required = str(pelt_params['compute_pelt'] == 'True' or neighbor_params['compute_neighbors'] == 'True' or texture_params['compute_textures'] == 'True' or rf_params['compute_rf'] == 'True')
+        finalise_required = str(finaliser_params['finalise'] == 'True')
+        summarise_required = str(finaliser_params['summarise'] == 'True')
         
-        with open('/tmp/processing_required', 'w') as outfile:
-            outfile.write(processing_required)
+        with open('/tmp/process_required', 'w') as outfile:
+            outfile.write(process_required)
+        with open('/tmp/finalise_required', 'w') as outfile:
+            outfile.write(finalise_required)
+        with open('/tmp/summarise_required', 'w') as outfile:
+            outfile.write(summarise_required)
 
         logging.info("Completed tile generation.")
 
@@ -458,9 +473,9 @@ spec:
       - name: dates_idx
         valueFrom:
           path: /tmp/dates_idx
-      - name: max_date
+      - name: latest_date
         valueFrom:
-          path: /tmp/max_date
+          path: /tmp/latest_date
       - name: prior_date
         valueFrom:
           path: /tmp/prior_date
@@ -653,11 +668,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 7Gi
-          cpu: 2000m
-        requests:
-          memory: 7Gi
+          memory: 6Gi
           cpu: 1500m
+        requests:
+          memory: 6Gi
+          cpu: 1200m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -801,7 +816,7 @@ spec:
     inputs:
       parameters:
       - name: prior_date
-      - name: max_date
+      - name: latest_date
       artifacts:
       - name: changes
         path: /tmp/changes
@@ -810,7 +825,7 @@ spec:
       limit: "3"
       retryPolicy: "Always"
     script:
-      image: python:3.12-alpine
+      image: "{{workflow.parameters.dask_image}}"
       imagePullPolicy: IfNotPresent
       env:
         - name: SMTP_USERNAME
@@ -842,6 +857,7 @@ spec:
           cpu: 1000m
       command: [python]
       source: |
+        import sys
         import smtplib
         import ssl
         from email.message import EmailMessage
@@ -849,37 +865,34 @@ spec:
         import numpy as np
         import datetime
         from babel.dates import format_date
-        from io import StringIO
         from pyproj import Transformer
         import ast
         import base64
         import requests
+        import json
         import time
         
         with open('/tmp/changes', "r") as f:
-            changes = StringIO(json.load(f))
-
-        # with open('/tmp/prior_date', "r") as f:
-        #     prior_date = datetime.datetime.strptime(f.read(),'%Y%m%d')
-
-        # with open('/tmp/max_date', "r") as f:
-        #     max_date = datetime.datetime.strptime(f.read(),'%Y%m%d')
+            changes = json.load(f)
 
         prior_date = "{{inputs.parameters.prior_date}}"
-        max_date = "{{inputs.parameters.max_date}}"
+        latest_date = "{{inputs.parameters.latest_date}}"
             
         if len(changes) == 0:
-            raise Exception("No changes were found, /tmp/changes was empty.")
+            print("No changes were found, /tmp/changes was empty. No email will be sent.")
+            sys.exit(0)
             
         if len(prior_date) == 0:
-            raise Exception("Prior date was not found, /tmp/prior_date was empty.")
+            print("Prior date was not found, /tmp/prior_date was empty. No email will be sent.")
+            sys.exit(0)
 
-        if len(max_date) == 0:
-            raise Exception("Current date not found, /tmp/max_date was empty.")
+        if len(latest_date) == 0:
+            print("Current date not found, /tmp/latest_date was empty. No email will be sent.")
+            sys.exit(0)
 
         changes = pd.read_json(changes).sort_values(by=['dates'], ascending=False)
         prior_date = datetime.datetime.strptime(prior_date,'%Y%m%d')
-        max_date = datetime.datetime.strptime(max_date,'%Y%m%d')
+        latest_date = datetime.datetime.strptime(latest_date,'%Y%m%d')
         
         def bool_to_tick(val):
             if val == 1:
@@ -922,7 +935,7 @@ spec:
             return lon, lat
 
         msg = EmailMessage()
-        msg['Subject'] = f"SAMSARA - {format_date(max_date, 'd MMM YYYY', locale='es_CL')} - {len(changes)} cambio{'s'[:len(changes)^1]} detectado{'s'[:len(changes)^1]}"
+        msg['Subject'] = f"SAMSARA - {format_date(latest_date, 'd MMM YYYY', locale='es_CL')} - {len(changes)} cambio{'s'[:len(changes)^1]} detectado{'s'[:len(changes)^1]}"
         msg['From'] = "samsara@datacubechile.cl"
         msg['To'] = "samsara@datacubechile.cl"
         msg['Bcc'] = ["jonathan.hodge@uai.cl","hodge.jonathan@gmail.com"]
@@ -952,7 +965,7 @@ spec:
             """
         html_start = f"""\
             <body>
-                <h3>SAMSARA reporte {format_date(max_date, 'd MMMM YYYY', locale='es_CL')}</h3>
+                <h3>SAMSARA reporte {format_date(latest_date, 'd MMMM YYYY', locale='es_CL')}</h3>
                 
                 <p>Durante los ultimos 12 meses, se encontr{'ó' if len(changes) == 1 else 'aron'} <strong>{len(changes)} cambio{'s'[:len(changes)^1]}</strong></p>
                 <div>
@@ -964,7 +977,7 @@ spec:
                             </tr>
                             <tr>
                                 <th class="head-left">Fecha de análisis actual</th>
-                                <td>{format_date(max_date, 'long', locale='es_CL')}</td>
+                                <td>{format_date(latest_date, 'long', locale='es_CL')}</td>
                             </tr>
                             <tr>
                                 <th class="head-left">Numero de cambios detectados</th>
@@ -1039,7 +1052,7 @@ spec:
         msg.add_header('reply-to', 'jonathan.hodge@uai.cl')
 
         server=os.getenv('SMTP_SERVER')
-        username=os.getenv('SMTP_USERNAME')'
+        username=os.getenv('SMTP_USERNAME')
         password=os.getenv('SMTP_PASSWORD')
 
         context = ssl.create_default_context()
