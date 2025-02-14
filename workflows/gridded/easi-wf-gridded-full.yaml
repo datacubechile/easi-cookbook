@@ -918,7 +918,6 @@ spec:
         import json
         import time
         from io import StringIO
-        time.sleep(24*60*60)
         
         with open('/tmp/changes', "r") as f:
             changes = json.load(f)
