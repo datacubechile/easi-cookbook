@@ -162,7 +162,7 @@ class Assemble(ArgoTask):
                 json.dump(dates, outfile)
 
             with open("/tmp/changes", "w") as outfile:
-                outfile.write([])
+                outfile.write("")
 
             with open("/tmp/prior_date", "w") as outfile:
                 outfile.write("")

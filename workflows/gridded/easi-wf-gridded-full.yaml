@@ -61,7 +61,7 @@ spec:
     - name: rf_params
       value: '{"compute_rf": "False", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
     - name: finaliser_params
-      value: '{"assemble": "True", "finalise": "True", "summarise": "False"}'
+      value: '{"assemble": "True", "finalise": "False", "summarise": "False"}'
     - name: dask_image # data-pipeline image to use for Pods
       value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -721,12 +721,16 @@ spec:
           from tasks.gridded.finaliser import Finalise
 
           finaliser_params = {{workflow.parameters.finaliser_params}}
-
+          
+          # TODO: ADD IN DELETER AND INDEX DELETER
+          
           if finaliser_params['finalise'] == 'True':
             finaliser = Finalise({{inputs.parameters}})
-            finaliser.finalise(latest_date={{inputs.parameters.latest_date}})
+            finaliser.finalise(latest_date="{{inputs.parameters.latest_date}}")
           else:
             logging.info("Skipping finalisation.")
+          
+          # TODO: ADD IN INDEXER
 
   - name: summariser
     inputs:
@@ -899,6 +903,7 @@ spec:
       command: [python]
       source: |
         import sys
+        import os
         import smtplib
         import ssl
         from email.message import EmailMessage
@@ -912,6 +917,8 @@ spec:
         import requests
         import json
         import time
+        from io import StringIO
+        time.sleep(24*60*60)
         
         with open('/tmp/changes', "r") as f:
             changes = json.load(f)
@@ -931,7 +938,7 @@ spec:
             print("Current date not found, /tmp/latest_date was empty. No email will be sent.")
             sys.exit(0)
 
-        changes = pd.read_json(changes).sort_values(by=['dates'], ascending=False)
+        changes = pd.read_json(StringIO(changes)).sort_values(by=['dates'], ascending=False)
         prior_date = datetime.datetime.strptime(prior_date,'%Y%m%d')
         latest_date = datetime.datetime.strptime(latest_date,'%Y%m%d')
         
@@ -1095,9 +1102,10 @@ spec:
         server=os.getenv('SMTP_SERVER')
         username=os.getenv('SMTP_USERNAME')
         password=os.getenv('SMTP_PASSWORD')
+        port=os.getenv('SMTP_PORT')
 
         context = ssl.create_default_context()
-        server = smtplib.SMTP_SSL(server, SMTP_PORT, context=context)
+        server = smtplib.SMTP_SSL(server, port, context=context)
 
         server.login(username,password)
         server.send_message(msg)

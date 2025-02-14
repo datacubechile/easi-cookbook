@@ -330,9 +330,9 @@ def get_prior_date(bucket, prefix, date_key, dt_format='%Y%m%d'):
         objs = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
         dates = [datetime.datetime.strptime(p['Prefix'].split("/")[-2],dt_format) for p in objs['CommonPrefixes']]
         latest_date = max(dates)
-
-        if latest_date < date_key:
-            prior_date = latest_date
+        if len(dates) > 1:
+            dates.remove(latest_date)
+            prior_date = max(dates)
         else:
             prior_date = ""
 
