@@ -61,7 +61,11 @@ spec:
     - name: rf_params
       value: '{"compute_rf": "False", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
     - name: finaliser_params
-      value: '{"assemble": "True", "finalise": "False", "summarise": "False"}'
+      value: '{"delete_files": "True", "assemble": "True", "finalise": "False", "summarise": "False"}'
+    - name: delete_index
+      value: "True"
+    - name: index
+      value: "True"
     - name: dask_image # data-pipeline image to use for Pods
       value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -204,6 +208,32 @@ spec:
               from: "{{steps.assembler.outputs.artifacts.dates}}"
         withParam: "{{steps.assembler.outputs.parameters.dates_idx}}"
         when: "{{steps.tile-generator.outputs.parameters.finalise_required}} == True"
+    - - name: index-delete-raw
+        templateRef:
+          name: easi-index-delete-template
+          template: start
+        arguments:
+          parameters:
+            - name: product
+              value: samsara_raw
+            - name: order_params_json
+              value: '{"start_date": "1980-01-01", "end_date": "2030-12-31"}'
+            - name: mode
+              value: 'fast-delete'
+        when: "{{workflow.parameters.delete_index}} == True"
+    - - name: index-delete-summary
+        templateRef:
+          name: easi-index-delete-template
+          template: start
+        arguments:
+          parameters:
+            - name: product
+              value: samsara_summary
+            - name: order_params_json
+              value: '{"start_date": "1980-01-01", "end_date": "2030-12-31"}'
+            - name: mode
+              value: 'fast-delete'
+        when: "{{workflow.parameters.delete_index}} == True"
     - - name: summariser
         template: summariser
         arguments:
@@ -259,6 +289,9 @@ spec:
       - name: finalise_required
         valueFrom:
           path: /tmp/finalise_required
+      - name: index_required
+        valueFrom:
+          path: /tmp/index_required
       - name: summarise_required
         valueFrom:
           path: /tmp/summarise_required
@@ -355,13 +388,16 @@ spec:
         finaliser_params = {{workflow.parameters.finaliser_params}}
 
         process_required = str(pelt_params['compute_pelt'] == 'True' or neighbor_params['compute_neighbors'] == 'True' or texture_params['compute_textures'] == 'True' or rf_params['compute_rf'] == 'True')
-        finalise_required = str(finaliser_params['finalise'] == 'True')
+        finalise_required = str(finaliser_params['finalise'] == 'True' or finaliser_params['delete_files'] == 'True')
+        index_required = str(finaliser_params['delete_index'] == 'True' or finaliser_params['index'] == 'True')
         summarise_required = str(finaliser_params['summarise'] == 'True')
         
         with open('/tmp/process_required', 'w') as outfile:
             outfile.write(process_required)
         with open('/tmp/finalise_required', 'w') as outfile:
             outfile.write(finalise_required)
+        with open('/tmp/index_required', 'w') as outfile:
+            outfile.write(index_required)
         with open('/tmp/summarise_required', 'w') as outfile:
             outfile.write(summarise_required)
 
@@ -725,8 +761,13 @@ spec:
           # TODO: ADD IN DELETER AND INDEX DELETER
           
           if finaliser_params['finalise'] == 'True':
+            if finaliser_params['delete_files'] == 'True':
+              delete_files = True
+            else:
+              delete_files = False
+
             finaliser = Finalise({{inputs.parameters}})
-            finaliser.finalise(latest_date="{{inputs.parameters.latest_date}}")
+            finaliser.finalise(latest_date="{{inputs.parameters.latest_date}}",delete_files=delete_files)
           else:
             logging.info("Skipping finalisation.")
           
@@ -846,8 +887,13 @@ spec:
               {'name': 'new_product', 'value': 'samsara_summary'}
             ]
 
+            if finaliser_params['delete_files'] == 'True':
+              delete_files = True
+            else:
+              delete_files = False
+
             summariser = Summarise(params_summariser)
-            summariser.summarise()
+            summariser.summarise(delete_files=delete_files)
           else:
             logging.info("Skipping summarising.")
 

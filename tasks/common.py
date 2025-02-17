@@ -14,6 +14,30 @@ from botocore.exceptions import ClientError
 
 from .geometry import get_boundary, validate_geojson
 
+def s3_delete_folder(prefix:str, bucket:str):
+    """Delete a folder prefix from S3
+
+    :param prefix: The parent prefix for deletion
+    :param bucket: Bucket to delete from
+    :return: True if file was deleted, else False
+    """
+
+    if "s3" not in locals():
+        s3 = boto3.client("s3")
+    files_to_delete = []
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page['Contents']:
+                files_to_delete.append({"Key": obj["Key"]})
+
+        response = s3.delete_objects(
+            Bucket=bucket, Delete={"Objects": files_to_delete}
+        )
+    except (ClientError, KeyError) as e:
+        logging.error(e)
+        return False
+    return True
 
 def s3_upload_file(file_name, bucket, object_name=None):
     """Upload a file to an S3 bucket

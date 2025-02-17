@@ -13,18 +13,13 @@ sys.path.insert(1,'/opt/repo/easiwf/easi-workflows/tasks/eo3assemble')
 
 import xarray as xr
 import pandas as pd
-import rioxarray
-from datetime import datetime
-from eodatasets3 import DatasetPrepare
-from easi_assemble import EasiPrepare
-from eodatasets3.images import ValidDataMethod
 
 from dask.distributed import Client, LocalCluster
 from datacube import Datacube
 from tasks.argo_task import ArgoTask
 from tasks import samsara_prepare
+from tasks.common import s3_delete_folder
 from datacube.utils.rio import configure_s3_access
-from datacube.utils.cog import write_cog
 
 
 import warnings
@@ -85,13 +80,18 @@ class Summarise(ArgoTask):
                 key=key,
             )
 
-    def summarise(self) -> None:
+    def summarise(self, delete_files=False) -> None:
         for log in ['rasterio', 'distributed', 'distributed.nanny','distributed.scheduler','distributed.client']:
             logger = logging.getLogger(log)
             logger.setLevel(logging.ERROR)
         """Summarise the data."""
 
         self.start_client()
+        if delete_files:
+            s3_delete_folder(
+                prefix=self.output["prefix"],
+                bucket=self.output["bucket"]
+            )
 
         dc = Datacube()
         ds = dc.load(**self.odc_query)
