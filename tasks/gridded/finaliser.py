@@ -24,7 +24,7 @@ from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
 from rasterio.features import rasterize
 
-from tasks.common import get_prior_date, ts_to_datetime, s3_delete_folder
+from tasks.common import get_prior_date, ts_to_datetime
 from tasks import geohash as gh
 
 from tasks import samsara_prepare
@@ -367,7 +367,7 @@ class Finalise(ArgoTask):
         with open('/tmp/dates', "r") as f:
             self.dates = json.load(f)
 
-    def finalise(self, latest_date, delete_files=False) -> None:
+    def finalise(self, latest_date) -> None:
         # Clean up memory before starting
         gc.collect()
 
@@ -445,11 +445,6 @@ class Finalise(ArgoTask):
 
         out_path = Path(self.temp_dir.name) / "dcc_format" / rf_version / self.neighbor_params['way']
         filename = "break000"
-
-        if delete_files:
-            bucket = self.output["bucket"]
-            product_key = Path(self.output["final_prefix"])
-            s3_delete_folder(bucket=bucket, prefix=product_key)
 
         for date in self.dates[int(self.dates_idx)]:
             date = datetime.datetime.strptime(str(date), "%Y%m%d").date()
