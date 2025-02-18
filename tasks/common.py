@@ -4,6 +4,7 @@ import logging
 import math
 import sys
 import os
+from typing import Iterable
 
 import boto3
 import dateutil
@@ -13,6 +14,18 @@ from pathlib import Path
 from botocore.exceptions import ClientError
 
 from .geometry import get_boundary, validate_geojson
+
+
+def by_chunk(items: list, chunk_size: int = 1000) -> Iterable:
+    """Separate iterable objects by chunks"""
+    chunk = []
+    for item in items:
+        if len(chunk) >= chunk_size:
+            yield chunk
+            chunk = []
+        chunk.append(item)
+    yield chunk
+
 
 def s3_delete_folder(prefix:str, bucket:str):
     """Delete a folder prefix from S3
@@ -29,11 +42,14 @@ def s3_delete_folder(prefix:str, bucket:str):
         paginator = s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page['Contents']:
-                files_to_delete.append({"Key": obj["Key"]})
-
-        response = s3.delete_objects(
-            Bucket=bucket, Delete={"Objects": files_to_delete}
-        )
+                files_to_delete.append({"Key": obj.key})
+        if len(files_to_delete):
+            for items in by_chunk(files_to_delete, 1000):
+                s3.delete_objects(
+                    Bucket=bucket,
+                    Delete={"Objects": items},
+                )
+        # ERROR:root:An error occurred (MalformedXML) when calling the DeleteObjects operation: The XML you provided was not well-formed or did not validate against our published schema
     except (ClientError, KeyError) as e:
         logging.error(e)
         return False

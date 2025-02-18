@@ -289,9 +289,6 @@ spec:
       - name: finalise_required
         valueFrom:
           path: /tmp/finalise_required
-      - name: index_required
-        valueFrom:
-          path: /tmp/index_required
       - name: summarise_required
         valueFrom:
           path: /tmp/summarise_required
@@ -389,15 +386,12 @@ spec:
 
         process_required = str(pelt_params['compute_pelt'] == 'True' or neighbor_params['compute_neighbors'] == 'True' or texture_params['compute_textures'] == 'True' or rf_params['compute_rf'] == 'True')
         finalise_required = str(finaliser_params['finalise'] == 'True' or finaliser_params['delete_files'] == 'True')
-        index_required = str(finaliser_params['delete_index'] == 'True' or finaliser_params['index'] == 'True')
         summarise_required = str(finaliser_params['summarise'] == 'True')
         
         with open('/tmp/process_required', 'w') as outfile:
             outfile.write(process_required)
         with open('/tmp/finalise_required', 'w') as outfile:
             outfile.write(finalise_required)
-        with open('/tmp/index_required', 'w') as outfile:
-            outfile.write(index_required)
         with open('/tmp/summarise_required', 'w') as outfile:
             outfile.write(summarise_required)
 
@@ -651,7 +645,6 @@ spec:
           if finaliser_params['delete_files'] == 'True':
             output = {{workflow.parameters.output}}
             s3_delete_folder(prefix=output["final_prefix"], bucket=output["bucket"])
-            
 
 ##--------------------------------
   - name: finaliser
