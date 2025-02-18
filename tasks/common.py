@@ -49,7 +49,7 @@ def s3_delete_folder(prefix:str, bucket:str):
             else:
                 logger.info(f"No items to delete from s3://{bucket}/{prefix}")
         if len(files_to_delete):
-            logger.info(f"Deleting {files_to_delete} item{'s'[:len(files_to_delete)^1]}")
+            logger.info(f"Deleting {len(files_to_delete)} item{'s'[:len(files_to_delete)^1]}")
             for items in by_chunk(files_to_delete, 1000):
                 s3.delete_objects(
                     Bucket=bucket,
