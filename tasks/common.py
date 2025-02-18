@@ -15,6 +15,7 @@ from botocore.exceptions import ClientError
 
 from .geometry import get_boundary, validate_geojson
 
+logger = logging.getLogger(__name__)
 
 def by_chunk(items: list, chunk_size: int = 1000) -> Iterable:
     """Separate iterable objects by chunks"""
@@ -39,11 +40,16 @@ def s3_delete_folder(prefix:str, bucket:str):
         s3 = boto3.client("s3")
     files_to_delete = []
     try:
+        logger.info(f"Deleting files from s3://{bucket}/{prefix}")
         paginator = s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-            for obj in page['Contents']:
-                files_to_delete.append({"Key": obj.key})
+            if page['KeyCount'] > 0:
+                for obj in page['Contents']:
+                    files_to_delete.append({"Key": obj['Key']})
+            else:
+                logger.info(f"No items to delete from s3://{bucket}/{prefix}")
         if len(files_to_delete):
+            logger.info(f"Deleting {files_to_delete} item{'s'[:len(files_to_delete)^1]}")
             for items in by_chunk(files_to_delete, 1000):
                 s3.delete_objects(
                     Bucket=bucket,
@@ -51,7 +57,7 @@ def s3_delete_folder(prefix:str, bucket:str):
                 )
         # ERROR:root:An error occurred (MalformedXML) when calling the DeleteObjects operation: The XML you provided was not well-formed or did not validate against our published schema
     except (ClientError, KeyError) as e:
-        logging.error(e)
+        logger.error(e)
         return False
     return True
 
@@ -75,7 +81,7 @@ def s3_upload_file(file_name, bucket, object_name=None):
     try:
         s3.upload_file(file_name, bucket, object_name)  # Config=config
     except (ClientError, FileNotFoundError) as e:
-        logging.error(e)
+        logger.error(e)
         return False
     return True
 
@@ -103,7 +109,7 @@ def s3_download_folder(prefix:str, bucket:str, path:str):
                     os.makedirs(tmp_dir)
                 s3.download_file(bucket, str(key), tmp_dir / key.name)
     except (ClientError, KeyError) as e:
-        logging.error(e)
+        logger.error(e)
         return False
     return True
 
@@ -127,7 +133,7 @@ def s3_download_file(key:str, bucket:str, path:str):
         else:
             s3.download_file(bucket, key, path + "/" + Path(key).name)
     except (ClientError) as e:
-        logging.error(e)
+        logger.error(e)
         return False
     return True
 
@@ -356,7 +362,7 @@ def calc_chunk(val, target):
 #         second_date = max(dates) if len(dates) != 0 else None
 
 #     except (ClientError) as e:
-#         logging.error(e)
+#         logger.error(e)
 #         return False, False
 #     return latest_date, second_date
 
@@ -377,7 +383,7 @@ def get_prior_date(bucket, prefix, date_key, dt_format='%Y%m%d'):
             prior_date = ""
 
     except (ClientError) as e:
-        logging.error(e)
+        logger.error(e)
         return False
     return prior_date
 
