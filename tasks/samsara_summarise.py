@@ -20,7 +20,7 @@ from tasks.argo_task import ArgoTask
 from tasks import samsara_prepare
 from tasks.common import s3_delete_folder
 from datacube.utils.rio import configure_s3_access
-
+import rioxarray
 
 import warnings
 from rasterio.errors import NotGeoreferencedWarning
