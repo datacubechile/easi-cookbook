@@ -80,18 +80,13 @@ class Summarise(ArgoTask):
                 key=key,
             )
 
-    def summarise(self, delete_files=False) -> None:
+    def summarise(self) -> None:
         for log in ['rasterio', 'distributed', 'distributed.nanny','distributed.scheduler','distributed.client']:
             logger = logging.getLogger(log)
             logger.setLevel(logging.ERROR)
         """Summarise the data."""
 
         self.start_client()
-        if delete_files:
-            s3_delete_folder(
-                prefix=self.output["prefix"],
-                bucket=self.output["bucket"]
-            )
 
         dc = Datacube()
         ds = dc.load(**self.odc_query)

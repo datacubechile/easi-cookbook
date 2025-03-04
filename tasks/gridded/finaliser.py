@@ -24,7 +24,7 @@ from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
 from rasterio.features import rasterize
 
-from tasks.common import get_prior_date, ts_to_datetime
+from tasks.common import get_prior_date, ts_to_datetime, s3_delete_folder
 from tasks import geohash as gh
 
 from tasks import samsara_prepare
@@ -33,6 +33,7 @@ import warnings
 from rasterio.errors import NotGeoreferencedWarning
 
 warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
+logging.getLogger("rasterio").setLevel(logging.ERROR)
 
 class Assemble(ArgoTask):
     def __init__(self, input_params: [dict[str, str]]) -> None:
@@ -324,6 +325,8 @@ class Assemble(ArgoTask):
         write_cog(sitios_prioritarios, fname = path / f'sam_sitios_prioritarios_{filespec}.tif', nodata=0, overwrite=True)
 
         if self.output['upload']:
+            self._logger.info(f"Removing any old files from s3://{bucket}/{self.output['prefix']}/final/{date_key_str}/")
+            s3_delete_folder(str(Path(self.output['prefix']) / 'final' / date_key_str), bucket)
             for file_path in path.glob("*.tif"):
                 if not file_path.is_file():
                     continue

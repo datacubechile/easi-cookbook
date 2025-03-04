@@ -367,6 +367,7 @@ class TileProcessor(ArgoTask):
         self._logger.info(f"Processing {key}")
 
         t0 = datetime.datetime.now()
+        self._logger.info(f"Loading data for {key}")
         dataset = self.load_from_grid(key)
         ds_product = dataset.product.compute()
         t1 = datetime.datetime.now()
