@@ -92,7 +92,8 @@ class Summarise(ArgoTask):
         ds = ds.mag.where(~ds.mag.isnull())
 
         blocks = int(self.summary_grid_size / abs(self.odc_query['resolution'][0]))
-
+        
+        logger._info("Coarsening and summarising raw data")
         coarsened_sum = ds.coarsen(x=blocks, boundary="pad").sum().coarsen(y=blocks, boundary="pad").sum()
         coarsened_sum = coarsened_sum.where(~coarsened_sum.isnull())
         coarsened_sum_agg = coarsened_sum.groupby('time.year').sum().rename('mag_total')
@@ -107,15 +108,14 @@ class Summarise(ArgoTask):
         dataset = coarsened_sum_agg.to_dataset()
         dataset['mag_count'] = coarsened_count_agg.astype('int16')
 
-        self._logger.info('Computing summary')
+        self._logger.info('Computing summary results')
         dataset = dataset.compute()
         data_sum = dataset.mag_total
         data_count = dataset.mag_count
 
         product = self.new_product
-
-        times = len(data_sum.year)
-
+        
+        self._logger.info('Creating final summary files.')
         for index, t in enumerate(data_sum.year.values):
             ts = pd.to_datetime(str(t))
             d = ts.strftime('%Y')
