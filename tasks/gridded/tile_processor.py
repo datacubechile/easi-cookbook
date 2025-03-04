@@ -343,17 +343,13 @@ class TileProcessor(ArgoTask):
             path=str(prod_dir)
         )
 
-    def upload_files(self, prod_dir: Path, remove_existing=True) -> None:
+    def upload_files(self, prod_dir: Path) -> None:
         """Upload local `prod_dir` and its contents to S3.
 
         Uses the bucket and prefix defined in `self.output`.
         """
         bucket = self.output["bucket"]
         prefix = Path(self.output["prefix"])
-        if remove_existing:
-            # Remove existing files to avoid risk of old files persisting in the same location
-            self._logger.info(f"    Removing existing files from s3://{bucket}/{prefix}")
-            self.s3_delete_folder(prefix, bucket)
 
         for path in prod_dir.rglob("*"):
             if not path.is_file():
