@@ -32,7 +32,7 @@ spec:
   arguments:
     parameters:
     - name: product
-      value: '["landsat5_c2l2_sr", "landsat7_c2l2_sr", "landsat8_c2l2_sr", "landsat9_c2l2_sr"]'
+      value: '["landsat7_c2l2_sr", "landsat8_c2l2_sr", "landsat9_c2l2_sr"]'
     - name: odc_query
       # Must include output_crs, resolution, group-by
       value: '{ "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "origin": [15,15] }'
@@ -43,7 +43,7 @@ spec:
       # TODO Replace with values suitable for your deployment environment.
       value: '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final_prefix": "products-index/samsara-raw/"}'
     - name: roi # Region of Interest
-      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2025-02-18T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
+      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2025-02-14T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
     - name: size # Tile size in odc_query.output_crs units
       value: 18000
     - name: tiles_per_worker
@@ -61,10 +61,14 @@ spec:
     - name: rf_params
       value: '{"compute_rf": "False", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
     - name: finaliser_params
-      value: '{"delete_files": "True", "assemble": "False", "finalise": "True", "summarise": "False"}'
-    - name: delete_index
+      value: '{"assemble": "False", "finalise": "False", "summarise": "True"}'
+    - name: delete_index_raw
       value: "True"
-    - name: index
+    - name: delete_index_summary
+      value: "True"
+    - name: index_raw
+      value: "True"
+    - name: index_summary
       value: "True"
     - name: dask_image # data-pipeline image to use for Pods
       value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
@@ -208,6 +212,8 @@ spec:
               from: "{{steps.assembler.outputs.artifacts.dates}}"
         withParam: "{{steps.assembler.outputs.parameters.dates_idx}}"
         when: "{{steps.tile-generator.outputs.parameters.finalise_required}} == True"
+    # NOT WORKING
+    # PRODUCT = ["landsat5_c2l2_sr", "landsat7_c2l2_sr", "landsat8_c2l2_sr", "landsat9_c2l2_sr"] !!!!
     - - name: index-delete-raw
         templateRef:
           name: easi-index-delete-template
@@ -220,7 +226,11 @@ spec:
               value: '{"start_date": "1980-01-01", "end_date": "2030-12-31"}'
             - name: mode
               value: 'fast-delete'
-        when: "{{workflow.parameters.delete_index}} == True"
+            - name: delete_product
+              value: false
+            - name: pipeline_image # data-pipeline image to use for Pods
+              value: '444488357543.dkr.ecr.us-west-2.amazonaws.com/data-pipeline:develop.latest'
+        when: "{{workflow.parameters.delete_index_raw}} == True"
     - - name: index-delete-summary
         templateRef:
           name: easi-index-delete-template
@@ -233,7 +243,35 @@ spec:
               value: '{"start_date": "1980-01-01", "end_date": "2030-12-31"}'
             - name: mode
               value: 'fast-delete'
-        when: "{{workflow.parameters.delete_index}} == True"
+            - name: delete_product
+              value: false
+            - name: pipeline_image # data-pipeline image to use for Pods
+              value: '444488357543.dkr.ecr.us-west-2.amazonaws.com/data-pipeline:develop.latest'
+        when: "{{workflow.parameters.delete_index_summary}} == True"
+    - - name: index-raw
+        templateRef:
+          name: easi-catalog-index-template-v2
+          template: call-easi-index-workflow
+        arguments:
+          parameters:
+          - name: metadata_catalog_list
+            value: '[{"url":"https://raw.githubusercontent.com/GeoscienceAustralia/dea-config/591266dabab5e52abc88a06e5b0d2d9a28b6e283/workspaces/sandbox-metadata.yaml", "secret": ""}]'
+          - name: product_catalog_list
+            value: >-
+                    [
+                      {"url":"https://dev.azure.com/emo-chile/Chile%20Datacube/_apis/git/repositories/easi-config/items?versionDescriptor[version]=master&scopePath=/catalog/easihub-products.csv", "secret": ".azure-devops-easido-git-ro-pat.json"}
+                    ]
+          - name: product_filter_catalog
+            value: '{"url": "https://dev.azure.com/emo-chile/Chile%20Datacube/_apis/git/repositories/easi-config/items?path=/catalog/easihub-products-filters.csv&versionDescriptor[versionOptions]=0&versionDescriptor[versionType]=0&versionDescriptor[version]=master&resolveLfs=true&$format=octetStream&api-version=5.0&download=true", "secret": ".azure-devops-easido-git-ro-pat.json"}'
+          - name: product_names
+            value: '["samsara_raw"]'
+          - name: init_db
+            value: "false"
+          - name: pipeline_image
+            value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/data-pipeline:develop.latest"
+          - name: admin-config-secret
+            value: admin-secret-easi-odc-v2
+        when: "{{workflow.parameters.index_raw}} == True"
     - - name: summariser
         template: summariser
         arguments:
@@ -249,6 +287,30 @@ spec:
           - name: package-secret
             value: "{{workflow.parameters.package-secret}}"
         when: "{{steps.tile-generator.outputs.parameters.summarise_required}} == True"
+    - - name: index-summary
+        templateRef:
+          name: easi-catalog-index-template-v2
+          template: call-easi-index-workflow
+        arguments:
+          parameters:
+          - name: metadata_catalog_list
+            value: '[{"url":"https://raw.githubusercontent.com/GeoscienceAustralia/dea-config/591266dabab5e52abc88a06e5b0d2d9a28b6e283/workspaces/sandbox-metadata.yaml", "secret": ""}]'
+          - name: product_catalog_list
+            value: >-
+                    [
+                      {"url":"https://dev.azure.com/emo-chile/Chile%20Datacube/_apis/git/repositories/easi-config/items?versionDescriptor[version]=master&scopePath=/catalog/easihub-products.csv", "secret": ".azure-devops-easido-git-ro-pat.json"}
+                    ]
+          - name: product_filter_catalog
+            value: '{"url": "https://dev.azure.com/emo-chile/Chile%20Datacube/_apis/git/repositories/easi-config/items?path=/catalog/easihub-products-filters.csv&versionDescriptor[versionOptions]=0&versionDescriptor[versionType]=0&versionDescriptor[version]=master&resolveLfs=true&$format=octetStream&api-version=5.0&download=true", "secret": ".azure-devops-easido-git-ro-pat.json"}'
+          - name: product_names
+            value: '["samsara_summary"]'
+          - name: init_db
+            value: "false"
+          - name: pipeline_image
+            value: "444488357543.dkr.ecr.us-west-2.amazonaws.com/data-pipeline:develop.latest"
+          - name: admin-config-secret
+            value: admin-secret-easi-odc-v2
+        when: "{{workflow.parameters.index_summary}} == True"
     - - name: emailer
         template: emailer
         arguments:
@@ -374,10 +436,12 @@ spec:
         logging.basicConfig(level=logging.INFO)
 
         from tasks.gridded.tile_generator import TileGenerator
+        from tasks.common import s3_delete_folder
 
         generator = TileGenerator({{inputs.parameters}})
         generator.generate_tiles()
 
+        output = {{workflow.parameters.output}}
         pelt_params = {{workflow.parameters.pelt_params}}
         neighbor_params = {{workflow.parameters.neighbor_params}}
         texture_params = {{workflow.parameters.texture_params}}
@@ -385,7 +449,7 @@ spec:
         finaliser_params = {{workflow.parameters.finaliser_params}}
 
         process_required = str(pelt_params['compute_pelt'] == 'True' or neighbor_params['compute_neighbors'] == 'True' or texture_params['compute_textures'] == 'True' or rf_params['compute_rf'] == 'True')
-        finalise_required = str(finaliser_params['finalise'] == 'True' or finaliser_params['delete_files'] == 'True')
+        finalise_required = str(finaliser_params['finalise'] == 'True')
         summarise_required = str(finaliser_params['summarise'] == 'True')
         
         with open('/tmp/process_required', 'w') as outfile:
@@ -396,6 +460,21 @@ spec:
             outfile.write(summarise_required)
 
         logging.info("Completed tile generation.")
+
+        # Clear out old files if required:
+        if output['upload'] == 'True':
+            if pelt_params['compute_pelt'] == 'True':
+                print(f"Deleting old PELT files from s3://{output['bucket']}/{output['prefix']}predict/PELT/")
+                s3_delete_folder(output['prefix'] + 'predict/PELT/', output['bucket'])
+            if neighbor_params['compute_neighbors'] == 'True':
+                print(f"Deleting old NEIGHS files from s3://{output['bucket']}/{output['prefix']}predict/NEIGHS/")
+                s3_delete_folder(output['prefix'] + 'predict/NEIGHS/', output['bucket'])
+            if texture_params['compute_textures'] == 'True':
+                print(f"Deleting old GLCM files from s3://{output['bucket']}/{output['prefix']}predict/GLCM/")
+                s3_delete_folder(output['prefix'] + 'predict/GLCM/', output['bucket'])
+            if rf_params['compute_rf'] == 'True':
+                print(f"Deleting old RF files from s3://{output['bucket']}/{output['prefix']}predict/RF/")
+                s3_delete_folder(output['prefix'] + 'predict/RF/', output['bucket'])
 
 ##--------------------------------
   - name: tile-processor
@@ -616,8 +695,6 @@ spec:
           import json
           import logging
           from pathlib import Path
-          import time
-          time.sleep(24*60*60)
 
           package_path = "{{inputs.parameters.package-path}}"
           package_repo = "{{inputs.parameters.package-repo}}"
@@ -634,6 +711,7 @@ spec:
 
           assembler = Assemble({{inputs.parameters}})
           
+          output = {{workflow.parameters.output}}
           finaliser_params = {{workflow.parameters.finaliser_params}}
           
           if finaliser_params['assemble'] == 'True':          
@@ -641,10 +719,11 @@ spec:
           else:
             logging.info("Skipping main assembly, preparing dates for next step.")
             assembler.assemble(get_dates_only=True)
-          
-          if finaliser_params['delete_files'] == 'True':
-            output = {{workflow.parameters.output}}
-            s3_delete_folder(prefix=output["final_prefix"], bucket=output["bucket"])
+
+          if output['upload'] == 'True':
+            if finaliser_params['finalise'] == 'True': 
+              print(f"Deleting final raw files from s3://{output['final_prefix']}/{output['final_prefix']}")
+              s3_delete_folder(prefix=output["final_prefix"], bucket=output["bucket"])
 
 ##--------------------------------
   - name: finaliser
@@ -759,15 +838,11 @@ spec:
 
           finaliser_params = {{workflow.parameters.finaliser_params}}
           
-          # TODO: ADD IN DELETER AND INDEX DELETER
-          
           if finaliser_params['finalise'] == 'True':
             finaliser = Finalise({{inputs.parameters}})
             finaliser.finalise(latest_date="{{inputs.parameters.latest_date}}")
           else:
             logging.info("Skipping finalisation.")
-          
-          # TODO: ADD IN INDEXER
 
   - name: summariser
     inputs:
@@ -872,24 +947,29 @@ spec:
           logging.basicConfig(level=logging.INFO)
 
           from tasks.samsara_summarise import Summarise
-
+          from tasks.common import s3_delete_folder
+          
+          output = {{workflow.parameters.output}}
           finaliser_params = {{workflow.parameters.finaliser_params}}
+          
+          bucket = output["bucket"]
+          prefix = "products-index/samsara-summary/"
 
           if finaliser_params['summarise'] == 'True':
+            summary_grid_size = 1980
             params_summariser = [
-              {'name': 'odc_query', 'value': '{"product": "samsara_raw", "measurements": "mag", "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "dask_chunks": {"time":6, "x": 1980,"y": 1980}}'},
-              {'name': 'output', 'value': '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "products-index/samsara-summary/"}'},
-              {'name': 'summary_grid_size', 'value': '1980'},
-              {'name': 'new_product', 'value': 'samsara_summary'}
+                {'name': 'odc_query', 'value': '{"product": "samsara_raw", "measurements": "mag", "output_crs": "epsg:32619", "resolution": [-30, 30], "group_by": "solar_day", "dask_chunks": {"time":6, "x": '+str(summary_grid_size)+',"y": '+str(summary_grid_size)+'}}'},
+                {'name': 'output', 'value': '{"upload": "'+output["upload"]+'", "bucket": "'+bucket+'", "prefix": "'+prefix+'"}'},
+                {'name': 'summary_grid_size', 'value': str(summary_grid_size)},
+                {'name': 'new_product', 'value': 'samsara_summary'}
             ]
 
-            if finaliser_params['delete_files'] == 'True':
-              delete_files = True
-            else:
-              delete_files = False
+            if output['upload'] == 'True':
+              print(f"Deleting final summary files from s3://{bucket}/{prefix}")
+              s3_delete_folder(prefix=prefix, bucket=bucket)
 
             summariser = Summarise(params_summariser)
-            summariser.summarise(delete_files=delete_files)
+            summariser.summarise()
           else:
             logging.info("Skipping summarising.")
 
@@ -962,7 +1042,11 @@ spec:
         from io import StringIO
         
         with open('/tmp/changes', "r") as f:
-            changes = json.load(f)
+            try:
+              changes = json.load(f)
+            except:
+              print("Loading changes failed, exiting")
+              sys.exit(0)
 
         prior_date = "{{inputs.parameters.prior_date}}"
         latest_date = "{{inputs.parameters.latest_date}}"
