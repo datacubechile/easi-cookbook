@@ -55,7 +55,6 @@ def s3_delete_folder(prefix:str, bucket:str):
                     Bucket=bucket,
                     Delete={"Objects": items},
                 )
-        # ERROR:root:An error occurred (MalformedXML) when calling the DeleteObjects operation: The XML you provided was not well-formed or did not validate against our published schema
     except (ClientError, KeyError) as e:
         logger.error(e)
         return False

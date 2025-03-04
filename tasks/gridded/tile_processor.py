@@ -91,7 +91,7 @@ class TileProcessor(ArgoTask):
 
     def load_from_grid(self, key: (int, int)) -> xr.Dataset:
         """Load data from grid flow."""
-        
+
         def load_product(product, query, chunks):
             dc = Datacube()
             ds = dc.load(product=product, **query)
@@ -109,7 +109,7 @@ class TileProcessor(ArgoTask):
             # return result
 
         cell = self.product_cells.get(key)
-        
+
         # All geoboxes for the tiles are the same shape. Use this for the chunk size in
         # dask so each tile spatially is a single chunk. Note that the geobox resolution
         # is in (y, x) order
@@ -131,7 +131,7 @@ class TileProcessor(ArgoTask):
             }
 
             chunks = {'x':int(self.pelt_params['processing_chunk_size']), 'y':int(self.pelt_params['processing_chunk_size']), 'time':-1}
-            
+
             # This approach increases parallelisation across the multi-product loads
             datasets = self._client.map(load_product, products, query=query, chunks=chunks)
             results = self._client.gather(datasets)
@@ -190,12 +190,12 @@ class TileProcessor(ArgoTask):
 
         # ndvi = simages.mask_and_calculate_ndvi(ds)#.compute()
         # ndvi = ndvi.rechunk({'time':-1, "x": 65, "y": 65})
-        
+
         # ds_scattered = self._client.scatter(ds)
         # pelt_args = {
         #     'array': ds_scattered,
-        #     'n_breaks':n_breaks, 
-        #     'penalty':penalty, 
+        #     'n_breaks':n_breaks,
+        #     'penalty':penalty,
         #     'start_date':start_date,
         #     'model':model,
         #     'min_size':min_size,
@@ -220,7 +220,7 @@ class TileProcessor(ArgoTask):
         # fpelt.date.data = spelt.datetime_to_timestamp(fpelt.date.data.astype('datetime64[s]'))
 
         return fpelt
-    
+
     def run_neighbors(self, ds: xr.Dataset, filter_type: str='last_negative') -> (xr.Dataset, xr.Dataset):
         pelt_filtered = sfilter.filter_by_variable(ds, filter_type=filter_type, variable = 'magnitude').chunk({'x':200, 'y':200})
 
@@ -238,7 +238,7 @@ class TileProcessor(ArgoTask):
 
         inputImg = inputImg.compute()
         pelt_filtered = pelt_filtered.compute()
-        
+
         return inputImg, pelt_filtered
 
     def run_textures(self, inputImg: xr.Dataset, pelt_filtered: xr.Dataset) -> (xr.Dataset, xr.DataArray):
@@ -280,16 +280,16 @@ class TileProcessor(ArgoTask):
         }
 
         glcm = sglcm.glcm_textures(darr, radius = glcm_radius, n_feats = 7, **mb_kwargs)
-    
+
         glcm = glcm.compute()
-        
+
         return inputImg, glcm
     
     def run_rf(self, inputImg: xr.Dataset, pelt_filtered: xr.Dataset) -> (xr.Dataset, xr.Dataset, xr.Dataset):
         rf_model = self.rf_params["rf_model"]
         prefix = Path(self.output["prefix"])
         s3_download_file(str(prefix.parent / 'resources' / rf_model),self.output['bucket'],self.temp_dir.name)
-        nname = rf_model.split(".")[0]
+        # name = rf_model.split(".")[0]
         classifier = joblib.load(self.temp_dir.name + '/' + rf_model)
 
         inputImgf = inputImg.chunk({"x": 500, "y": 500})
@@ -343,13 +343,18 @@ class TileProcessor(ArgoTask):
             path=str(prod_dir)
         )
 
-    def upload_files(self, prod_dir: Path) -> None:
+    def upload_files(self, prod_dir: Path, remove_existing=True) -> None:
         """Upload local `prod_dir` and its contents to S3.
 
         Uses the bucket and prefix defined in `self.output`.
         """
         bucket = self.output["bucket"]
         prefix = Path(self.output["prefix"])
+        if remove_existing:
+            # Remove existing files to avoid risk of old files persisting in the same location
+            self._logger.info(f"    Removing existing files from s3://{bucket}/{prefix}")
+            self.s3_delete_folder(prefix, bucket)
+
         for path in prod_dir.rglob("*"):
             if not path.is_file():
                 continue
@@ -373,11 +378,11 @@ class TileProcessor(ArgoTask):
 
         self._logger.info(f"Key {key} has shape {dataset.ndvi.shape}")
         # self._logger.debug(f"- Dataset dims: {dataset.dims}")
-        
+
         xref = f"{key[0]:+04}".replace("+", "E").replace("-", "W")
         yref = f"{key[1]:+04}".replace("+", "N").replace("-", "S")
         cellref = yref + xref
-        
+
         out_folder = Path(self.temp_dir.name) / 'outputs/predict'
         out_folder.mkdir(parents=True, exist_ok=True)
         pelt_out = out_folder / 'PELT' / cellref
@@ -388,7 +393,7 @@ class TileProcessor(ArgoTask):
             t2 = datetime.datetime.now()
             self._logger.info(f"Starting PELT at {t1}")
             # All cloud-masking and scaling is done inside the run_pelt step below
-            
+
             pelt_output = self.run_pelt(dataset.ndvi)
             pelt_output = pelt_output.compute()
             # pelt_output['date_original'] = pelt_output.date
@@ -403,10 +408,10 @@ class TileProcessor(ArgoTask):
             # Write to disk
             self._logger.info(f"Pixels per second: {int((dataset.ndvi.shape[1]*dataset.ndvi.shape[2])/(t3-t2).total_seconds())}")
             self._logger.info("Writing pelt output to file")
-            
+
             # Write list of products and dates
             # dataset.to_dataframe()['product'].to_csv(f"{str(pelt_out)}/product_date_list_{cellref}.csv")
-            
+
             for bkp in pelt_output['bkp'].values:
                 # write_cog(pelt_output.date_original.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_bks_dim-bkp-orig-{bkp}.tif", overwrite=True, nodata=np.nan)
                 write_cog(pelt_output.date.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_bks_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan)#.compute()
@@ -429,26 +434,26 @@ class TileProcessor(ArgoTask):
             pelt_output["date"] = bks
 
             pelt_output.attrs = dataset.attrs
-            
+
             if len(pelt_output.bkp) != int(self.pelt_params['n_breaks']):
                 self._logger.error("The loaded data does not have the expected number of breakpoints.")
                 raise
             self._logger.info("Pelt files loaded from S3")
-        
+
         way = self.neighbor_params['way']
         # for way in self.neighbor_params['ways']:
         print(f"Polygon: {self.id_}, using: {way}")
 
         neighs_out = out_folder / 'NEIGHS' / way / cellref
         neighs_out.mkdir(parents=True, exist_ok=True)
-        
+
         t4 = datetime.datetime.now()
-        
+
         if self.compute_neighbors == "True":
             inputImg, pelt_filtered = self.run_neighbors(ds=pelt_output, filter_type=way)
             t5 = datetime.datetime.now()
             self._logger.info(f"Computing neighbors for {key} took: {t5-t4}")
-            
+
             write_cog(inputImg.magnitude, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
             write_cog(inputImg.ngbh_stdev, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_stdev.tif', overwrite=True, nodata=np.nan)
             write_cog(inputImg.ngbh_count, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif', overwrite=True, nodata=np.nan)
@@ -482,7 +487,7 @@ class TileProcessor(ArgoTask):
 
         glcm_out = out_folder / 'GLCM' / way / cellref
         glcm_out.mkdir(parents=True, exist_ok=True)
-        
+
         t6 = datetime.datetime.now()
         if self.compute_textures == 'True':
             inputImg, glcm = self.run_textures(inputImg, pelt_filtered)
@@ -491,7 +496,7 @@ class TileProcessor(ArgoTask):
 
             for prop in glcm['prop'].values:
                 write_cog(glcm.sel({'prop': prop}), fname=f"{str(glcm_out)}/glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif", overwrite=True, nodata=np.nan)
-            
+
             if self.output["upload"] == "True":
                 self.upload_files(glcm_out)
 
@@ -537,7 +542,7 @@ class TileProcessor(ArgoTask):
             products['product_num'] = xr.where(products.product=='landsat8_c2l2_sr',8,products.product_num)
             products['product_num'] = xr.where(products.product=='landsat7_c2l2_sr',7,products.product_num)
             products['product_num'] = xr.where(products.product=='landsat5_c2l2_sr',5,products.product_num)
-            
+
             # Match the dates to find the satellite product for each pixel and get rid of any unnecessary dimensions and variables
             sam_products = products.product_num.where(((products.time.astype(int)*1e-9).astype(int) == sam_dates)).max('time').squeeze().astype('float32')
 
@@ -582,7 +587,7 @@ class TileProcessor(ArgoTask):
             now_ts = datetime.datetime.timestamp(datetime.datetime.now())
             # Get the last change date
             ts = change_dates.max().values.item()
-            
+
             # Create an empty Dataset with the same shape as the input data
             post_break = xr.full_like(dataset_trimmed.isel(time=0),fill_value=int(now_ts),dtype=int)
             post_break = post_break.rename('ts').drop('time')
@@ -594,7 +599,7 @@ class TileProcessor(ArgoTask):
                 t = (dt.astype(int)*1e-09).astype(int)
                 temp_ = xr.where((~dataset_trimmed.sel(time=dt).isnull()) & (t>change_dates),t,post_break.ts)
                 post_break['ts'] = xr.where(temp_ < post_break.ts,temp_,post_break.ts)
-            
+
             # Clean up the data to replace the now_ts value with 0
             post_break = xr.where(post_break==int(now_ts),0,post_break)
 
@@ -608,7 +613,7 @@ class TileProcessor(ArgoTask):
                 p = products.product_num.sel(time=dt).min().values.item()
                 # product_num = np.int8(re.compile('^landsat(\d{1})_c2l2_sr$').match(p).group(1))
                 post_break['product'] = xr.where(post_break.ts==t,p,post_break.product).astype('float32')
-            
+
             # Clean up the data by removing zeros
             post_break=post_break.where(post_break!=0)#.astype('float32')
 

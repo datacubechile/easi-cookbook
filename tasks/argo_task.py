@@ -2,7 +2,7 @@ import logging
 from json import loads
 from json.decoder import JSONDecodeError
 
-from .common import s3_upload_file, s3_download_folder
+from .common import s3_upload_file, s3_download_folder, s3_delete_folder
 
 class ArgoTask:
     """
@@ -46,3 +46,10 @@ class ArgoTask:
         A wrapper around `common.s3_download_files`.
         """
         s3_download_folder(prefix=prefix, bucket=bucket, path=path)
+
+    def s3_delete_folder(self, prefix, bucket):
+        """Delete a 'folder' of objects from S3.
+
+        A wrapper around `common.s3_delete_folder`.
+        """
+        s3_delete_folder(prefix=prefix, bucket=bucket)

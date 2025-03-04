@@ -109,7 +109,7 @@ class Summarise(ArgoTask):
         coarsened_count = coarsened_count.where(~coarsened_count.isnull())
         coarsened_count_agg = coarsened_count.groupby('time.year').sum().rename('mag_count')
         coarsened_count_agg = coarsened_count_agg.where(coarsened_count_agg != 0)
-        
+
         dataset = coarsened_sum_agg.to_dataset()
         dataset['mag_count'] = coarsened_count_agg.astype('int16')
 
@@ -132,7 +132,7 @@ class Summarise(ArgoTask):
 
             if not f_dir.exists():
                 os.makedirs(f_dir, exist_ok=True)
-    
+
             self._logger.info(f'Exporting raster: {f_dir.stem}')
             data_sum.sel(year=t).rio.to_raster(str(f_dir / fname) + "_" + data_sum.name.lower() + ".tif")
             data_count.sel(year=t).rio.to_raster(str(f_dir / fname) + "_" + data_count.name.lower() + ".tif")
