@@ -18,7 +18,6 @@ from dask.distributed import Client, LocalCluster
 from datacube import Datacube
 from tasks.argo_task import ArgoTask
 from tasks import samsara_prepare
-from tasks.common import s3_delete_folder
 from datacube.utils.rio import configure_s3_access
 import rioxarray
 
