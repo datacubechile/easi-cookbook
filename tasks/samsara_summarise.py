@@ -138,7 +138,7 @@ class Summarise(ArgoTask):
                 continue
 
             self._logger.info(f'Finished summarising timestep {index+1} of {len(data_sum.year)}')
-        if self.output['upload']:
+        if self.output['upload'] == 'True':
             self.upload_files(Path(self.temp_dir.name))
 
         self._logger.info('Done summarising')

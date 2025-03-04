@@ -324,7 +324,7 @@ class Assemble(ArgoTask):
         write_cog(areas_protegidas, fname = path / f'sam_areas_protegidas_{filespec}.tif', nodata=0, overwrite=True)
         write_cog(sitios_prioritarios, fname = path / f'sam_sitios_prioritarios_{filespec}.tif', nodata=0, overwrite=True)
 
-        if self.output['upload']:
+        if self.output['upload'] == 'True':
             self._logger.info(f"Removing any old files from s3://{bucket}/{self.output['prefix']}/final/{date_key_str}/")
             s3_delete_folder(str(Path(self.output['prefix']) / 'final' / date_key_str), bucket)
             for file_path in path.glob("*.tif"):
@@ -489,7 +489,7 @@ class Finalise(ArgoTask):
                 # combined_ds.rio.to_raster(f'{fname}_multiband.tif',driver='COG')
                 samsara_prepare.prepare_samsara_raw(fname.parent)
 
-                if self.output['upload']:
+                if self.output['upload'] == 'True':
                     for file_path in out_path.rglob("*"):
                         if not file_path.is_file():
                             continue
