@@ -205,14 +205,15 @@ class Assemble(ArgoTask):
         def classify_with_shapefile(dataset,shapefile):
             gdf = gpd.read_file(shapefile)
             gdf = gdf.to_crs(dataset.rio.crs)
-            polys = [geometry for geometry in gdf.geometry]
+            # polys = [geometry for geometry in gdf.geometry]
+            polys = list(zip(gdf.geometry,gdf.objectid))
             mask = rasterize(
                     polys,
                     out_shape = (dataset.dims['y'],dataset.dims['x']),
                     transform = dataset.affine
             )
             da = dataset[list(dataset.data_vars.keys())[0]].compute()
-            da = xr.where(da.notnull() & mask,1,0)
+            da = xr.where(da.notnull() & mask,mask,0)
             return da
 
         # Download shapefiles
