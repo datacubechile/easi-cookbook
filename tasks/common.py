@@ -377,11 +377,11 @@ def get_prior_date(bucket, prefix, date_key, dt_format='%Y%m%d'):
         latest_date = max(dates)
 
         if len(dates) > 1: # if there are multiple dates to choose from
-            if date_key.strftime(dt_format) == latest_date: # and if the latest date in the list is the same as the max date in the current analysis
+            if date_key.strftime(dt_format) == latest_date.strftime(dt_format): # and if the latest date in the list is the same as the max date in the current analysis
                 dates.remove(latest_date) # remove the latest date from the list
             prior_date = max(dates) # return the latest date which is not the same as te current search
         elif len(dates) == 1: # if there is only one date to choose from
-            if date_key.strftime(dt_format) == latest_date: # if it is the same as the max date in the current analysis
+            if date_key.strftime(dt_format) == latest_date.strftime(dt_format): # if it is the same as the max date in the current analysis
                 prior_date = "" # there is no "prior" analysis date
             else:
                 prior_date = max(dates) # otherwise return the single value as the prior analysis date
