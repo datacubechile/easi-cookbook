@@ -47,11 +47,11 @@ measurements:
     nodata: 0
   - name: "sitios_prioritarios"
     units: "1"
-    dtype: uint8
+    dtype: uint16
     nodata: 0
   - name: "areas_protegidas"
     units: "1"
-    dtype: uint8
+    dtype: uint16
     nodata: 0
   
   # - name: "dates"
