@@ -8,16 +8,16 @@ from tempfile import TemporaryDirectory
 sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src')
 sys.path.insert(1, 'lib-samsara/src/')
 sys.path.insert(1, '.')
-sys.path.insert(1,'/home/jovyan/CSIRO/easi-workflows/tasks/eo3assemble')
-sys.path.insert(1,'/opt/repo/easiwf/easi-workflows/tasks/eo3assemble')
+sys.path.insert(1,'/home/jovyan/CSIRO/easi-workflows/tasks')
+sys.path.insert(1,'/opt/repo/easiwf/easi-workflows/tasks')
 
 import xarray as xr
 import pandas as pd
 
 from dask.distributed import Client, LocalCluster
 from datacube import Datacube
-from tasks.argo_task import ArgoTask
-from tasks import samsara_prepare
+from samsara_tasks.argo_task import ArgoTask
+from samsara_tasks import samsara_prepare
 from datacube.utils.rio import configure_s3_access
 import rioxarray
 
