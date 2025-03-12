@@ -6,8 +6,8 @@ from datacube.api import GridWorkflow
 from datacube.model import GridSpec
 from datacube.utils import geometry
 
-from tasks.argo_task import ArgoTask
-from tasks.common import process_order_params, validate_order
+from samsara_tasks.argo_task import ArgoTask
+from samsara_tasks.common import process_order_params, validate_order
 
 class TileGenerator(ArgoTask):
     FILEPATH_KEYS = "/tmp/keys.json"

@@ -231,7 +231,7 @@ spec:
           logging.error("At scale things fail!")
           sys.exit(exit_code)
 
-        from tasks.gridded.tile_generator import TileGenerator
+        from samsara_tasks.gridded.tile_generator import TileGenerator
 
         generator = TileGenerator({{inputs.parameters}})
         generator.generate_tiles()

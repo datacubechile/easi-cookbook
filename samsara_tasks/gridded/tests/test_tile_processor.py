@@ -1,12 +1,11 @@
+import boto3
 import logging
 import pytest
-import json
-import os
-from  tasks.gridded.tile_generator import TileGenerator
+from samsara_tasks.gridded.tile_processor import TileProcessor
+from samsara_tasks.gridded.tile_generator import TileGenerator
 
-
-
-def test_tile_generator():
+@pytest.fixture(autouse=True)
+def tile_generator():
     logging.basicConfig(level=logging.DEBUG)
 
     # Input params for local test
@@ -49,15 +48,30 @@ def test_tile_generator():
     generator = TileGenerator(input_params)
     generator.generate_tiles()
     logging.info("Completed tile generation.")
+    return
 
-    # check results
-    assert os.path.exists(TileGenerator.FILEPATH_KEYS) is True
-    assert os.path.exists(TileGenerator.FILEPATH_CELLS) is True
+def test_tile_processor():
+    logging.basicConfig(level=logging.INFO)
 
-    with open(TileGenerator.FILEPATH_KEYS, "rb") as fh:
-        keys = json.load(fh)
-    assert isinstance(keys, list)
-    assert len(keys) > 0
-    # TODO should  test the content as well..
+    client = boto3.client('sts')
+    userid = client.get_caller_identity()['UserId']
 
-    # TODO Unpickle the product cells from file and check content
+    # Input params for local test
+    input_params = [
+        {
+            "name": "measurements",
+            "value": '["red", "green", "blue", "pixel_qa"]',
+        },
+        {
+            "name": "output",
+            # TODO Replace with values suitable for your deployment environment.
+            "value": f'{{"bucket": "my-cluster-user-scratch", "prefix": "{userid}/geomedian"}}',
+        },
+        {
+            "name": "key",
+            "value": "[[24, -65], [25, -65]]",
+        },
+    ]
+    logging.info("Start tile-process...")
+    processor = TileProcessor(input_params)
+    processor.process_tile()

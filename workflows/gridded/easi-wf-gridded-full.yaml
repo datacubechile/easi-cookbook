@@ -703,8 +703,8 @@ spec:
 
           logging.basicConfig(level=logging.INFO)
 
-          from tasks.gridded.finaliser import Assemble
-          from tasks.common import s3_delete_folder
+          from samsara_tasks.gridded.finaliser import Assemble
+          from samsara_tasks.common import s3_delete_folder
 
           package_path        = "{{inputs.parameters.package-path}}"
           package_repo        = "https://dev.azure.com/csiro-easi/easi-hub-partners/_git/easi-workflows"

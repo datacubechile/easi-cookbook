@@ -22,15 +22,15 @@ from dask.distributed import Client, LocalCluster, wait
 from datacube import Datacube
 from datacube.utils.masking import make_mask, mask_invalid_data
 from odc.algo import to_f32
-from tasks.argo_task import ArgoTask
-from tasks.gridded.tile_generator import TileGenerator
+from samsara_tasks.argo_task import ArgoTask
+from samsara_tasks.gridded.tile_generator import TileGenerator
 from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
 from dea_tools.classification import predict_xr
 from rasterio.enums import Resampling
 from rasterio.features import rasterize
 
-from tasks.common import calc_chunk, s3_download_file
+from samsara_tasks.common import calc_chunk, s3_download_file
 
 import samsara.images as simages
 import samsara.pelt as spelt

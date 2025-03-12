@@ -19,15 +19,15 @@ import geopandas as gpd
 from dask.distributed import Client, LocalCluster
 import dask.array as da
 from datacube import Datacube
-from tasks.argo_task import ArgoTask
+from samsara_tasks.argo_task import ArgoTask
 from datacube.utils.rio import configure_s3_access
 from datacube.utils.cog import write_cog
 from rasterio.features import rasterize
 
-from tasks.common import get_prior_date, ts_to_datetime, s3_delete_folder
-from tasks import geohash as gh
+from samsara_tasks.common import get_prior_date, ts_to_datetime, s3_delete_folder
+from samsara_tasks import geohash as gh
 
-from tasks import samsara_prepare
+from samsara_tasks import samsara_prepare
 
 import warnings
 from rasterio.errors import NotGeoreferencedWarning
