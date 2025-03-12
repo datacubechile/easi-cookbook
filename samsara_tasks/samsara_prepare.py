@@ -7,10 +7,10 @@ from eodatasets3.images import ValidDataMethod
 import uuid
 import re
 import sys
-sys.path.insert(1,'/home/jovyan/CSIRO/easi-workflows/tasks/eo3assemble')
-sys.path.insert(1,'/opt/repo/easiwf/easi-workflows/tasks/eo3assemble')
+sys.path.insert(1,'/home/jovyan/CSIRO/easi-workflows/tasks')
+sys.path.insert(1,'/opt/repo/easiwf/easi-workflows/tasks')
 
-from easi_assemble import EasiPrepare
+from eo3assemble.easi_assemble import EasiPrepare
 
 SAMSARA_RAW_UUID_NAMESPACE = uuid.UUID("e05aa9a6-dedb-405a-8146-53329bbb2a7a") 
 SAMSARA_SUMMARY_UUID_NAMESPACE = uuid.UUID("2c5ae732-3fb5-4bcd-b985-045c811ddaa6")
