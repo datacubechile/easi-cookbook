@@ -369,7 +369,7 @@ class TileProcessor(ArgoTask):
         self._logger.info(f"Checking if {key} has already been processed")
 
         try:
-            prev_run_id = s3_get_file(key, bucket)
+            prev_run_id = s3_get_file(f"{key}/run_id", bucket)
             if prev_run_id == run_id:
                 self._logger.info(f"    {key} has already been processed in this run, skipping.")
                 return True
@@ -388,14 +388,6 @@ class TileProcessor(ArgoTask):
         self._logger.info(f"Processing {key}")
 
         t0 = datetime.datetime.now()
-        self._logger.info(f"Loading data for {key}")
-        dataset = self.load_from_grid(key)
-        ds_product = dataset.product.compute()
-        t1 = datetime.datetime.now()
-        self._logger.info(f"Data load and initial processing for {key} took: {t1-t0} at {int((dataset.ndvi.shape[1]*dataset.ndvi.shape[2])/(t1-t0).total_seconds())} pixels per second")
-
-        self._logger.info(f"Key {key} has shape {dataset.ndvi.shape}")
-        # self._logger.debug(f"- Dataset dims: {dataset.dims}")
 
         xref = f"{key[0]:+04}".replace("+", "E").replace("-", "W")
         yref = f"{key[1]:+04}".replace("+", "N").replace("-", "S")
@@ -429,6 +421,20 @@ class TileProcessor(ArgoTask):
         neighs_exists = self.check_step_run_id(neighs_prefix, self.run_id)
         glcm_exists = self.check_step_run_id(glcm_prefix, self.run_id)
         rf_exists = self.check_step_run_id(rf_prefix, self.run_id)
+
+        if pelt_exists and neighs_exists and glcm_exists and rf_exists:
+            self._logger.info(f"No need to process {key}. All steps exist.")
+            return
+
+        self._logger.info(f"Loading data for {key}")
+        dataset = self.load_from_grid(key)
+        ds_product = dataset.product.compute()
+        t1 = datetime.datetime.now()
+        self._logger.info(f"Data load and initial processing for {key} took: {t1-t0} at {int((dataset.ndvi.shape[1]*dataset.ndvi.shape[2])/(t1-t0).total_seconds())} pixels per second")
+
+        self._logger.info(f"Key {key} has shape {dataset.ndvi.shape}")
+        # self._logger.debug(f"- Dataset dims: {dataset.dims}")
+
 
         ### PELT ###
         if self.compute_pelt == 'True' and not pelt_exists:
