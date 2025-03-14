@@ -136,6 +136,14 @@ def s3_download_file(key:str, bucket:str, path:str):
         return False
     return True
 
+def s3_get_file(key: str, bucket: str):
+    if "s3" not in locals():
+        s3 = boto3.client("s3")
+    object = s3.get_object(Bucket=bucket, Key=key)
+    body = object['Body']
+    content = body.read().decode('utf-8')
+    return content
+
 def process_order_params(order_params: dict, aws_region: str):
     """
     Process the order_params and return a tuple of the components: datetime, bounding_box, boundary and query

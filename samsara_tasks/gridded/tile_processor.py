@@ -30,7 +30,7 @@ from dea_tools.classification import predict_xr
 from rasterio.enums import Resampling
 from rasterio.features import rasterize
 
-from samsara_tasks.common import calc_chunk, s3_download_file
+from samsara_tasks.common import calc_chunk, s3_download_file, s3_get_file
 
 import samsara.images as simages
 import samsara.pelt as spelt
@@ -284,7 +284,7 @@ class TileProcessor(ArgoTask):
         glcm = glcm.compute()
 
         return inputImg, glcm
-    
+
     def run_rf(self, inputImg: xr.Dataset, pelt_filtered: xr.Dataset) -> (xr.Dataset, xr.Dataset, xr.Dataset):
         rf_model = self.rf_params["rf_model"]
         prefix = Path(self.output["prefix"])
@@ -334,7 +334,7 @@ class TileProcessor(ArgoTask):
         """
         bucket = self.output["bucket"]
         prefix = Path(self.output["prefix"])
-        
+
         prefix = str(prefix / prod_dir.relative_to(Path(self.temp_dir.name+'/outputs')))
         self._logger.info(f"    Downloading s3://{bucket}/{prefix} to {prod_dir}")
         self.s3_download_folder(
@@ -362,6 +362,24 @@ class TileProcessor(ArgoTask):
                 key=key,
             )
 
+    def check_step_run_id(self, key, run_id) -> bool:
+        """Check if `key` has already been processed."""
+        bucket = self.output["bucket"]
+
+        self._logger.info(f"    Checking if {key} has already been processed")
+
+        try:
+            prev_run_id = s3_get_file(key, bucket)
+            if prev_run_id == run_id:
+                self._logger.info(f"    {key} has already been processed in this run, skipping.")
+                return True
+            else:
+                self._logger.info(f"    {key} has been processed but with a different run id")
+                return False
+        except Exception as e:
+            self._logger.info(f"    {key} has not been processed")  
+            return False
+
     def process_key(self, key: (int, int)) -> None:
         """Process some tiles."""
         self._logger.info(f"Processing {key}")
@@ -382,10 +400,35 @@ class TileProcessor(ArgoTask):
 
         out_folder = Path(self.temp_dir.name) / 'outputs/predict'
         out_folder.mkdir(parents=True, exist_ok=True)
+
         pelt_out = out_folder / 'PELT' / cellref
         pelt_out.mkdir(parents=True, exist_ok=True)
 
-        if self.compute_pelt == 'True':
+        way = self.neighbor_params['way']
+        neighs_out = out_folder / 'NEIGHS' / way / cellref
+        neighs_out.mkdir(parents=True, exist_ok=True)
+
+        glcm_out = out_folder / 'GLCM' / way / cellref
+        glcm_out.mkdir(parents=True, exist_ok=True)
+
+        rf_out = out_folder / 'RF' / way / cellref
+        rf_out.mkdir(parents=True, exist_ok=True)
+
+        # CHECK WHAT NEEDS TO BE RUN...
+        # Do files exist?
+        pelt_prefix = str(Path(self.output["prefix"]) / pelt_out.relative_to(self.temp_dir.name + "/outputs"))
+        neighs_prefix = str(Path(self.output["prefix"]) / neighs_out.relative_to(self.temp_dir.name + "/outputs"))
+        glcm_prefix = str(Path(self.output["prefix"]) / glcm_out.relative_to(self.temp_dir.name + "/outputs"))
+        rf_prefix = str(Path(self.output["prefix"]) / rf_out.relative_to(self.temp_dir.name + "/outputs"))
+
+        # Do they have the same run_id?
+        pelt_exists = self.check_step_run_id(key, pelt_prefix, self.run_id)
+        neighs_exists = self.check_step_run_id(key, neighs_prefix, self.run_id)
+        glcm_exists = self.check_step_run_id(key, glcm_prefix, self.run_id)
+        rf_exists = self.check_step_run_id(key, rf_prefix, self.run_id)
+
+        ### PELT ###
+        if self.compute_pelt == 'True' and not pelt_exists:
             # self.output["prefix"] = self.output["prefix"] + "/" + t1.strftime('%Y%m%d_%H%M%S')
             t2 = datetime.datetime.now()
             self._logger.info(f"Starting PELT at {t1}")
@@ -414,6 +457,10 @@ class TileProcessor(ArgoTask):
                 write_cog(pelt_output.date.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_bks_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan)#.compute()
                 write_cog(pelt_output.magnitude.sel({'bkp': bkp}), fname=f"{str(pelt_out)}/peltd_id{self.id_:03}_{cellref}_mgs_dim-bkp-{bkp}.tif", overwrite=True, nodata=np.nan)#.compute()
                 # self.save(ds=ds, key=key, start=start, upload=False)
+
+            with open(pelt_out / "run_id", "w") as f:
+                f.write(self.run_id)
+
             if self.output["upload"] == "True":
                 self.upload_files(pelt_out)
             self._logger.info("PELT computation complete")
@@ -437,16 +484,13 @@ class TileProcessor(ArgoTask):
                 raise
             self._logger.info("Pelt files loaded from S3")
 
-        way = self.neighbor_params['way']
         # for way in self.neighbor_params['ways']:
         print(f"Polygon: {self.id_}, using: {way}")
 
-        neighs_out = out_folder / 'NEIGHS' / way / cellref
-        neighs_out.mkdir(parents=True, exist_ok=True)
-
         t4 = datetime.datetime.now()
 
-        if self.compute_neighbors == "True":
+        ### NEIGHBORS ###
+        if self.compute_neighbors == "True" and not neighs_exists:
             inputImg, pelt_filtered = self.run_neighbors(ds=pelt_output, filter_type=way)
             t5 = datetime.datetime.now()
             self._logger.info(f"Computing neighbors for {key} took: {t5-t4}")
@@ -456,6 +500,10 @@ class TileProcessor(ArgoTask):
             write_cog(inputImg.ngbh_count, fname = neighs_out / f'neighs_id{self.id_:03}_{cellref}_ngbh_count.tif', overwrite=True, nodata=np.nan)
             write_cog(pelt_filtered.date, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_date.tif', overwrite=True, nodata=np.nan)
             write_cog(pelt_filtered.magnitude, fname = neighs_out / f'filtered_id{self.id_:03}_{cellref}_magnitude.tif', overwrite=True, nodata=np.nan)
+
+            with open(neighs_out / "run_id", "w") as f:
+                f.write(self.run_id)
+
             if self.output["upload"] == "True":
                 self.upload_files(neighs_out)
             self._logger.info("Neighbor computation complete")
@@ -482,17 +530,19 @@ class TileProcessor(ArgoTask):
                 pelt_filtered[var].attrs = dataset.attrs
             self._logger.info("Neighbor files loaded from S3")
 
-        glcm_out = out_folder / 'GLCM' / way / cellref
-        glcm_out.mkdir(parents=True, exist_ok=True)
-
         t6 = datetime.datetime.now()
-        if self.compute_textures == 'True':
+
+        ### TEXTURES ###
+        if self.compute_textures == 'True' and not glcm_exists:
             inputImg, glcm = self.run_textures(inputImg, pelt_filtered)
             t7 = datetime.datetime.now()
             self._logger.info(f"Computing textures for {key} took: {t7-t6}")
 
             for prop in glcm['prop'].values:
                 write_cog(glcm.sel({'prop': prop}), fname=f"{str(glcm_out)}/glcm_id{self.id_:03}_{cellref}_dim-prop-{prop}.tif", overwrite=True, nodata=np.nan)
+
+            with open(glcm_out / "run_id", "w") as f:
+                f.write(self.run_id)
 
             if self.output["upload"] == "True":
                 self.upload_files(glcm_out)
@@ -517,11 +567,11 @@ class TileProcessor(ArgoTask):
             self._logger.info("Texture files loaded from S3")
 
         inputImg = inputImg.compute()
-        rf_out = out_folder / 'RF' / way / cellref
-        rf_out.mkdir(parents=True, exist_ok=True)
+
         t8 = datetime.datetime.now()
 
-        if self.compute_rf == "True":   
+        ### RANDOM FOREST ###
+        if self.compute_rf == "True" and not rf_exists:   
             sam_bool, sam_mgs, sam_dates = self.run_rf(inputImg, pelt_filtered)
             t9 = datetime.datetime.now()
             self._logger.info(f"Computing random forest for {key} took: {t9-t8}")
@@ -632,6 +682,9 @@ class TileProcessor(ArgoTask):
                 nodata = 0,
                 compress='LZW'
             )
+
+            with open(rf_out / 'run_id', 'w') as f:
+                f.write(self.run_id)
 
             if self.output["upload"] == "True":
                 self.upload_files(rf_out)
