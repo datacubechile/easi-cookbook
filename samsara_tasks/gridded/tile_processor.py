@@ -422,10 +422,10 @@ class TileProcessor(ArgoTask):
         rf_prefix = str(Path(self.output["prefix"]) / rf_out.relative_to(self.temp_dir.name + "/outputs"))
 
         # Do they have the same run_id?
-        pelt_exists = self.check_step_run_id(key, pelt_prefix, self.run_id)
-        neighs_exists = self.check_step_run_id(key, neighs_prefix, self.run_id)
-        glcm_exists = self.check_step_run_id(key, glcm_prefix, self.run_id)
-        rf_exists = self.check_step_run_id(key, rf_prefix, self.run_id)
+        pelt_exists = self.check_step_run_id(pelt_prefix, self.run_id)
+        neighs_exists = self.check_step_run_id(neighs_prefix, self.run_id)
+        glcm_exists = self.check_step_run_id(glcm_prefix, self.run_id)
+        rf_exists = self.check_step_run_id(rf_prefix, self.run_id)
 
         ### PELT ###
         if self.compute_pelt == 'True' and not pelt_exists:
