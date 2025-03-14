@@ -14,7 +14,7 @@ import xarray as xr
 import geopandas as gpd
 
 sys.path.insert(1, '/home/jovyan/SAMSARA/lib-samsara/src')
-sys.path.insert(1, 'lib-samsara/src/')
+sys.path.insert(1, '/opt/repo/lib-samsara/src/')
 sys.path.insert(1, '.')
 
 import datetime
