@@ -366,7 +366,7 @@ class TileProcessor(ArgoTask):
         """Check if `key` has already been processed."""
         bucket = self.output["bucket"]
 
-        self._logger.info(f"    Checking if {key} has already been processed")
+        self._logger.info(f"Checking if {key} has already been processed")
 
         try:
             prev_run_id = s3_get_file(key, bucket)
@@ -377,8 +377,11 @@ class TileProcessor(ArgoTask):
                 self._logger.info(f"    {key} has been processed but with a different run id")
                 return False
         except Exception as e:
-            self._logger.info(f"    {key} has not been processed")  
-            return False
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                self._logger.info(f"    {key} has not been processed")  
+                return False
+            else:
+                raise
 
     def process_key(self, key: (int, int)) -> None:
         """Process some tiles."""
