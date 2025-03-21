@@ -14,7 +14,7 @@ spec:
   serviceAccountName: data-pipelines-default # TODO Replace with values suitable for your deployment environment.
   entrypoint: start
   onExit: exit-handler
-  parallelism: 36 # How many pods can execute simultaneously
+  parallelism: 40 # How many pods can execute simultaneously
   podGC:
     # strategy: OnPodSuccess
     strategy: OnPodCompletion  # delete pods immediately when pod is completed (including errors/failures)
@@ -41,9 +41,9 @@ spec:
       value: '["red", "nir08", "qa_pixel"]'  # json list string.
     - name: output # output artifacts are placed here
       # TODO Replace with values suitable for your deployment environment.
-      value: '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final_prefix": "products-index/samsara-raw/"}'
+      value: '{"upload": "False", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final_prefix": "products-index/samsara-raw/"}'
     - name: roi # Region of Interest
-      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2025-02-14T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
+      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2025-03-18T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
     - name: size # Tile size in odc_query.output_crs units
       value: 18000
     - name: tiles_per_worker
@@ -61,15 +61,18 @@ spec:
     - name: rf_params
       value: '{"compute_rf": "False", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
     - name: finaliser_params
-      value: '{"assemble": "False", "finalise": "False", "summarise": "True"}'
+      value: '{"assemble": "True", "finalise": "False", "summarise": "False"}'
     - name: delete_index_raw
-      value: "True"
+      value: "False"
     - name: delete_index_summary
-      value: "True"
+      value: "False"
     - name: index_raw
-      value: "True"
+      value: "False"
     - name: index_summary
-      value: "True"
+      value: "False"
+    - name: recipients
+      value: "['francisco.donoso@sma.gob.cl','cristobal.lagos@sma.gob.cl','javiera.poblete@sma.gob.cl','javier.lopatin@uai.cl','m.galleguillos@uai.cl','jonathan.hodge@uai.cl']"
+      # value: "['jonathan.hodge@uai.cl']"
     - name: dask_image # data-pipeline image to use for Pods
       value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -140,6 +143,8 @@ spec:
             value: "{{workflow.parameters.roi}}"
           - name: output
             value: "{{workflow.parameters.output}}"
+          - name: run_id
+            value: "{{steps.tile-generator.outputs.parameters.run_id}}"
           - name: key
             value: "{{item}}"
           - name: dask_workers
@@ -319,6 +324,14 @@ spec:
               value: "{{steps.assembler.outputs.parameters.latest_date}}"
             - name: prior_date
               value: "{{steps.assembler.outputs.parameters.prior_date}}"
+            - name: package-repo
+              value: "{{workflow.parameters.package-repo}}"
+            - name: package-branch
+              value: "{{workflow.parameters.package-branch}}"
+            - name: package-path
+              value: "{{workflow.parameters.package-path}}"
+            - name: recipients
+              value: "{{workflow.parameters.recipients}}"
           artifacts:
             - name: changes
               from: "{{steps.assembler.outputs.artifacts.changes}}"
@@ -354,6 +367,9 @@ spec:
       - name: summarise_required
         valueFrom:
           path: /tmp/summarise_required
+      - name: run_id
+        valueFrom:
+          path: /tmp/run_id
       artifacts:
       - name: product_cells
         path: /tmp/product_cells.pickle
@@ -435,8 +451,8 @@ spec:
 
         logging.basicConfig(level=logging.INFO)
 
-        from tasks.gridded.tile_generator import TileGenerator
-        from tasks.common import s3_delete_folder
+        from samsara_tasks.gridded.tile_generator import TileGenerator
+        from samsara_tasks.common import s3_delete_folder
 
         generator = TileGenerator({{inputs.parameters}})
         generator.generate_tiles()
@@ -458,6 +474,9 @@ spec:
             outfile.write(finalise_required)
         with open('/tmp/summarise_required', 'w') as outfile:
             outfile.write(summarise_required)
+        run_id = "{{workflow.name}}" + "_" + str("{{workflow.creationTimestamp}}")
+        with open('/tmp/run_id', 'w') as outfile:
+            outfile.write(run_id)
 
         logging.info("Completed tile generation.")
 
@@ -484,6 +503,7 @@ spec:
       - name: measurements
       - name: roi
       - name: output
+      - name: run_id
       - name: key
       - name: dask_workers
       - name: tile_buffer
@@ -499,7 +519,7 @@ spec:
       - name: product_cells
         path: /tmp/product_cells.pickle
     nodeSelector:
-      easi.csiro.au/node-purpose: 16vCPU_32Gib
+      easi.csiro.au/node-purpose: 8vCPU_16Gib # Using big nodes to avoid disruption - other compute optimised nodes have high disruption rates
     tolerations:
       - key: easi.csiro.au/dedicated
         operator: Equal
@@ -553,10 +573,10 @@ spec:
           mountPath: "{{inputs.parameters.package-path}}"
       resources: # limit the resources
         limits:
-          memory: 13Gi
+          memory: 12Gi
           cpu: 7000m
         requests:
-          memory: 13Gi
+          memory: 12Gi
           cpu: 7000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
@@ -567,6 +587,9 @@ spec:
           import logging
           from pathlib import Path
 
+          import os
+          os.environ["NUMEXPR_MAX_THREADS"] = "6"
+
           package_path = "{{inputs.parameters.package-path}}"
           package_repo = "{{inputs.parameters.package-repo}}"
           repo = Path(package_path) / package_repo.split('/')[-1]
@@ -574,7 +597,7 @@ spec:
 
           logging.basicConfig(level=logging.INFO)
 
-          from tasks.gridded.tile_processor import TileProcessor
+          from samsara_tasks.gridded.tile_processor import TileProcessor
 
           processor = TileProcessor({{inputs.parameters}})
           processor.process_tile()
@@ -686,7 +709,7 @@ spec:
           cpu: 4000m
         requests:
           memory: 7Gi
-          cpu: 2000m
+          cpu: 4000m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -700,6 +723,9 @@ spec:
           package_repo = "{{inputs.parameters.package-repo}}"
           repo = Path(package_path) / package_repo.split('/')[-1]
           sys.path.insert(1, str(repo))
+          
+          easiwf_repo = Path(package_path) / 'easiwf' / 'easi-workflows'
+          sys.path.insert(1, str(easiwf_repo))
 
           logging.basicConfig(level=logging.INFO)
 
@@ -813,11 +839,11 @@ spec:
         #   mountPath: "/secret/git"
       resources: # limit the resources
         limits:
-          memory: 6Gi
+          memory: 5Gi
           cpu: 1500m
         requests:
-          memory: 6Gi
-          cpu: 1200m
+          memory: 5Gi
+          cpu: 1500m
       workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
@@ -832,9 +858,12 @@ spec:
           repo = Path(package_path) / package_repo.split('/')[-1]
           sys.path.insert(1, str(repo))
 
+          easiwf_repo = Path(package_path) / 'easiwf' / 'easi-workflows'
+          sys.path.insert(1, str(easiwf_repo))
+
           logging.basicConfig(level=logging.INFO)
 
-          from tasks.gridded.finaliser import Finalise
+          from samsara_tasks.gridded.finaliser import Finalise
 
           finaliser_params = {{workflow.parameters.finaliser_params}}
           
@@ -943,11 +972,14 @@ spec:
           package_repo = "{{inputs.parameters.package-repo}}"
           repo = Path(package_path) / package_repo.split('/')[-1]
           sys.path.insert(1, str(repo))
+          
+          easiwf_repo = Path(package_path) / 'easiwf' / 'easi-workflows'
+          sys.path.insert(1, str(easiwf_repo))
 
           logging.basicConfig(level=logging.INFO)
 
-          from tasks.samsara_summarise import Summarise
-          from tasks.common import s3_delete_folder
+          from samsara_tasks.samsara_summarise import Summarise
+          from samsara_tasks.common import s3_delete_folder
           
           output = {{workflow.parameters.output}}
           finaliser_params = {{workflow.parameters.finaliser_params}}
@@ -978,6 +1010,10 @@ spec:
       parameters:
       - name: prior_date
       - name: latest_date
+      - name: package-repo          # A sidecar package repo
+      - name: package-branch        # The sidecar package repo branch
+      - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
+      - name: recipients
       artifacts:
       - name: changes
         path: /tmp/changes
@@ -987,6 +1023,20 @@ spec:
         operator: Equal
         effect: NoSchedule
         value: data_pipelines
+        
+    volumes:
+      - name: git-sync
+        emptyDir: {}
+
+    initContainers:
+      - name: init0
+        image: "{{workflow.parameters.git_image}}"
+        imagePullPolicy: IfNotPresent
+        mirrorVolumeMounts: true
+        command: [/bin/sh, -c]
+        args:
+          - cd "{{inputs.parameters.package-path}}" &&
+            git clone --depth 1 --branch "{{inputs.parameters.package-branch}}" "{{inputs.parameters.package-repo}}"
       
     retryStrategy:
       limit: "3"
@@ -994,6 +1044,9 @@ spec:
     script:
       image: "{{workflow.parameters.dask_image}}"
       imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - name: git-sync
+          mountPath: "{{inputs.parameters.package-path}}"
       env:
         - name: SMTP_USERNAME
           valueFrom:
@@ -1022,6 +1075,7 @@ spec:
         requests:
           memory: 2Gi
           cpu: 1000m
+      workingDir: "{{inputs.parameters.package-path}}"
       command: [python]
       source: |
         import sys
@@ -1039,42 +1093,100 @@ spec:
         import requests
         import json
         import time
+        import geopandas as gpd
+        from shapely.geometry import Point
         from io import StringIO
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        
+        package_path = "{{inputs.parameters.package-path}}"
+        package_repo = "{{inputs.parameters.package-repo}}"
+        repo = Path(package_path) / package_repo.split('/')[-1]
+        sys.path.insert(1, str(repo))
+
+        from samsara_tasks.common import s3_download_folder
+
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger('Argo.emailer')
         
         with open('/tmp/changes', "r") as f:
             try:
               changes = json.load(f)
             except:
-              print("Loading changes failed, exiting")
+              logger.warning("Loading changes failed, exiting")
               sys.exit(0)
 
         prior_date = "{{inputs.parameters.prior_date}}"
         latest_date = "{{inputs.parameters.latest_date}}"
+
+        recipients = {{inputs.parameters.recipients}}
             
         if len(changes) == 0:
-            print("No changes were found, /tmp/changes was empty. No email will be sent.")
+            logger.warning("No changes were found, /tmp/changes was empty. No email will be sent.")
             sys.exit(0)
             
         if len(prior_date) == 0:
-            print("Prior date was not found, /tmp/prior_date was empty. No email will be sent.")
+            logger.warning("Prior date was not found, /tmp/prior_date was empty. No email will be sent.")
             sys.exit(0)
 
         if len(latest_date) == 0:
-            print("Current date not found, /tmp/latest_date was empty. No email will be sent.")
+            logger.warning("Current date not found, /tmp/latest_date was empty. No email will be sent.")
             sys.exit(0)
 
         changes = pd.read_json(StringIO(changes)).sort_values(by=['dates'], ascending=False)
         prior_date = datetime.datetime.strptime(prior_date,'%Y%m%d')
         latest_date = datetime.datetime.strptime(latest_date,'%Y%m%d')
-        
+
+        bucket = 'easido-prod-dc-data'
+        temp_dir = TemporaryDirectory()
+        prefix = 'staging/samsara/resources/'
+        logger.info(f"Downloading s3://{bucket}/{prefix}areas_protegidas/ to {temp_dir.name}/areas_protegidas/")
+        s3_download_folder(
+            prefix=prefix + 'areas_protegidas/',
+            bucket=bucket,
+            path=temp_dir.name + '/areas_protegidas/'
+        )
+
+        logger.info(f"Downloading s3://{bucket}/{prefix}sitios_prioritarios/ to {temp_dir.name}/sitios_prioritarios/")
+        s3_download_folder(
+            prefix=prefix + 'sitios_prioritarios/',
+            bucket=bucket,
+            path=temp_dir.name + '/sitios_prioritarios/'
+        )
+
+        logger.info(f"Downloading s3://{bucket}/{prefix}comunas/ to {temp_dir.name}/comunas/")
+        s3_download_folder(
+            prefix=prefix + 'comunas/',
+            bucket=bucket,
+            path=temp_dir.name + '/comunas/'
+        )
+
+        comuna_gdf = gpd.read_file(temp_dir.name + '/comunas/comunas.shp')
+        comuna_gdf = comuna_gdf.to_crs('epsg:4326')
+
+        make_maps = True
+
         def bool_to_tick(val):
             if val == 1:
                 return "✔"
             else:
                 return ""
-        
-        make_maps = True
-        
+
+        def get_comuna_info(gdf, lat, lon):
+           
+            point = Point(lon, lat)
+            
+            point_gdf = gpd.GeoDataFrame(geometry=[point], crs='epsg:4326')
+            
+            result = gpd.sjoin(point_gdf, gdf, how='left', predicate='within')
+            
+            if not result.empty:
+                if str(result.iloc[0]['Comuna']) != 'nan':
+                    return f"{result.iloc[0]['Comuna']} ({result.iloc[0]['Region']})"
+            
+            return None 
+
         def generate_map_url(marker_lon, marker_lat, zoomed=False):
             key = "pk_961b27b44ed64dbdb42c5599432c7658"
             width = 150
@@ -1107,12 +1219,32 @@ spec:
 
             return lon, lat
 
+        def get_name_from_shp(shp_path, id, name_only=False):
+          gdf = gpd.read_file(shp_path)
+          try:
+              logger.debug(f"Checking for area {id} in {shp_path}")
+              selected = gdf[gdf["objectid"] == id]
+              areas = []
+
+              for i,s in selected.iterrows():
+                if "region" in s:
+                    areas.append(s["nombre_ap"] + ", " + s["region"] + " (" + s["designacio"] + ")")
+                else:
+                    areas.append(s["nombre_ap"] + " (" + s["designacio"] + ")")
+
+                area_list = ", ".join(areas)
+
+          except Exception as e:
+              logger.debug(f"Failed to get area {id} in {shp_path}: {e}")
+              area_list = None
+          return area_list
+
         msg = EmailMessage()
         msg['Subject'] = f"SAMSARA - {format_date(latest_date, 'd MMM YYYY', locale='es_CL')} - {len(changes)} cambio{'s'[:len(changes)^1]} detectado{'s'[:len(changes)^1]}"
         msg['From'] = "samsara@datacubechile.cl"
         msg['To'] = "samsara@datacubechile.cl"
-        msg['Bcc'] = ["jonathan.hodge@uai.cl","hodge.jonathan@gmail.com"]
-        
+        msg['Bcc'] = recipients
+
         # TODO: FIX THIS LINE
         msg.set_content("""\
         Este correo contiene información en formato HTML. No es posible visualizarlo en texto sin formato.
@@ -1122,17 +1254,21 @@ spec:
         <html>
             <head>
             <style type="text/css">
-                table  {border-collapse:collapse;border-color:#ccc;border-spacing:0;}
-                table td{background-color:#fff;border-color:#ccc;border-style:solid;border-width:1px;color:#333;
-                font-family:Arial, sans-serif;font-size:14px;overflow:hidden;padding:10px 5px;word-break:normal;}
-                table th{background-color:#f0f0f0;border-color:#ccc;border-style:solid;border-width:1px;color:#333;
-                font-family:Arial, sans-serif;font-size:14px;font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}
-                table .head-left{border-color:#9b9b9b;text-align:left;vertical-align:middle}
-                table .head-center{border-color:#9b9b9b;text-align:center;vertical-align:middle}
-                table .row-center{text-align:center;vertical-align:middle}
-                table .row-left{text-align:left;vertical-align:middle}
-                table tr.colour td {background-color: #efffff;}
-                table tr.white td {background-color: white;}
+                table {border-collapse:collapse;border-color:#ccc;border-spacing:0;}
+                table td {background-color:#fff;border-color:#ccc;border-style:solid;border-width:1px;color:#333;font-family:Arial, sans-serif;font-size:14px;overflow:hidden;padding:10px 5px;word-break:normal;max-width:300px;}
+                table th {background-color:#f0f0f0;border-color:#ccc;border-style:solid;border-width:1px;color:#333;font-family:Arial, sans-serif;font-size:14px;font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}
+                table .head-left {border-color:#9b9b9b;text-align:left;vertical-align:middle}
+                table .head-center {border-color:#9b9b9b;text-align:center;vertical-align:middle}
+                table .row-center {text-align:center;vertical-align:middle}
+                table .row-left {text-align:left;vertical-align:middle}
+                table tr.colour td {background-color:#efffff;}
+                table tr.white td {background-color:white;}
+                table .val-high {color:red;font-weight:bold;}
+                table .val-medium {color:orange;font-weight:bold;}
+                table .val-low {color:black;font-weight:bold;}
+                footer {margin-top:10px;font-size:12px;}
+                footer .footer-text {padding:5px;}
+                footer .logos span {display:inline-block;height:fit-content;vertical-align:middle;margin-right:10px;}
             </style>
             </head>
             """
@@ -1159,70 +1295,111 @@ spec:
                         </tbody>
                     </table>
                     <p>Cambios detectados podrían incluir nuevos pixeles al lado de cambios detectados anteriormente.</p>
-                </div>
-                <div>
-                    <table class="detail-table">
-                        <thead>
-                            <tr>
-                                <th class="head-left">Fecha</th>
-                                <th class="head-center">Magnitud</th>
-                                <th class="head-center">Área protegida</th>
-                                <th class="head-center">Área prioritaria</th>
-                                <th class="head-center">Vecinos (1 día)</th>
-                                <th class="head-center">Vecinos (60 días)</th>
-                                <th class="head-left">Lugar</th>
-                                <th class="head-left">Enlaces</th>
-                            </tr>
-                        </thead>
-                        <tbody>"""
-        html_rows = []
-        row_date_pre = 0
-        tr_colour = True
-        for index, row in changes.iterrows(): 
-            dt = datetime.datetime.fromtimestamp(row['dates']/1000) # TODO: CHECK THIS
-            idx = ast.literal_eval(index)
-            lon, lat = xy_to_ll(idx[1], idx[0],'epsg:32619')
+                </div>"""
 
-            if row_date_pre != row['dates']:
-                tr_colour = not tr_colour
+        if len(changes) == 0:
+          html_main_table = ""
+        else:
+          html_main_table_start = f"""\
+                  <div>
+                      <table class="detail-table">
+                          <thead>
+                              <tr>
+                                  <th class="head-left">Fecha</th>
+                                  <th class="head-left">Geohash</th>
+                                  <th class="head-center">Magnitud</th>
+                                  <th class="head-center">Comuna</th>
+                                  <th class="head-center">Área protegida</th>
+                                  <th class="head-center">Sitio prioritario</th>
+                                  <th class="head-center">Vecinos (1 día)</th>
+                                  <th class="head-center">Vecinos (60 días)</th>
+                                  <th class="head-left">Lugar</th>
+                                  <th class="head-left">Enlaces</th>
+                              </tr>
+                          </thead>
+                          <tbody>"""
+          html_rows = []
+          row_date_pre = 0
+          tr_colour = True
+          logger.info(f"Generating HTML email from {len(changes)} change{'s'[:len(changes)^1]}...")
+          for index, row in changes.iterrows(): 
+              dt = datetime.datetime.fromtimestamp(row['dates']/1000) # TODO: CHECK THIS
+              idx = ast.literal_eval(index)
+              lon, lat = xy_to_ll(idx[1], idx[0],'epsg:32619')
 
-            url = generate_map_url(lon, lat)
-            try:
-                r = requests.get(url)
-                time.sleep(1) # Just slow it down a bit
-                if r.status_code == 200:
-                    data_url = base64.b64encode(r.content).decode('utf-8')
-                    data_url = 'data:image/png;base64,' + data_url
+              if row_date_pre != row['dates']:
+                  tr_colour = not tr_colour
+
+              url = generate_map_url(lon, lat)
+              try:
+                if make_maps:
+                    r = requests.get(url)
+                    time.sleep(0.25) # Just slow it down a bit
+                    if r.status_code == 200:
+                        data_url = base64.b64encode(r.content).decode('utf-8')
+                        data_url = 'data:image/png;base64,' + data_url
+                    else:
+                        print(f"Status code was not 200 for {url}")
+                        data_url=""
                 else:
-                    print(f"Status code was not 200 for {url}")
-                    data_url=""
-            except requests.exceptions.RequestException as e:  # This is the correct syntax
-                raise SystemExit(e)
+                    # Blank map tile with no markers
+                    data_url='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAABkCAYAAABkW8nwAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAgAElEQVR4nOV9+Xsc1ZW2/6fJzCQzX2Ym+UJmJgGzmJBAMvkIEIZtAkkgccDExhhiCAHMYrAt2/Ju2bKtfd/3rbXvW3dLavW+t3qR5Lzf857q26putdQteZMzP9xH6qq6t27Vfeucc8+6q3LQgYoBO6qGnKgZ9aBu3I/6iQDqxnyoGXEj3Xm22jHvhufZv3TAgUttRuR3mpPON08FYPfHcOnjI3jnyaewaPegr7UTv/vBD9Df0YPheR+MzhBOHnwP+x55FANNjXj70UfhmJ/DcnQJq8tRnDt0CId/8TRWlqNwVnyEaMiHaMgPu9kk1452tMNtXcRfnn8ex/fulT4rsQj6G+rx+ve/L+cP/Ohx1OVdlnOxcADT/f3Sd2FyEosz03j3yZ/gykcfST9e01ZchN//539iZnBQruupqZbjnBOPvfD3f4/aSxfl+nDAj3d+/IS0oZZmRMPavFeXY3LN/3z725jq7UU4GMT0lAmlp3MTx5Yjofjz3N9tlwKKAoS+6c9t9Xx+9wIut5tQNuhad37GGUVHdT32PrQbhqY25L5/GB8890sY5+3onLJjYmwG7z/9NK4dOQLz6KgsUOXZM7i5srwOWJ7GE0nA2vvDH+LQT5+S9rv/+A80Xb8mC8p+lz/8UI7bjLM4tW+fAC/k82IlGhZgEXQEFEH3yQsvCMB4DwIj58035Rjv8eWvfy2AjYSCAqRUYK0uRwV4H/3yOfz2gQdw9p134HM6cHN1BYVHj+Klb34TpuFh+L0eDA6MoS7/uhwb7+r62wFWKlhuR6sZ8+Fyhxn5XQtpz/fOLcGy6BCKlXfkC/zx8cdx5fOjMDqDGJr3o7upXb7gtx95WKgDF/y9//qZUIKbK7EEsCL2GXiaTyLqsSC6FJBFf+uRRwSQ5bmnhUItRyNYjUWEgnEMLjTHZPvt974ngFpdjshf9m0puIEjL78sYAj5fVhdicm4+x9/XCgW+/E6gtYyNSkgSges1eWYgKn6/Dm5540vvsBfb96Ua17+p3/CZE8PQgEfxsdnUHLytBz7m6JYdwJYlcNuAdYNw2La863TQdj8yzj/wUf4y0sv4w+7H0Z3UyvaJ20wOkI48c4hHHrqKfTXVqGvugwlR4/gt9/7v7IY/OoVsDx2G3y2BfisZllMPSvkArNxoXhupL1NqFlD/lVhr2x/eOghoSCrq8tJrJCAJHAIsr/eXEVHaYmAir/Zj9SIv8lKb66sSF8FLFKxSCgo50iVCJY3d++WOXMsUmDelxST5wbbO/HuT3+Gw0//Qp4nFg7ec1DsWGCVDToFWEV99g2vmXVFMdw7iFf+z7fx9p7HYZq3o3rYhhmTDXt3P4Lc/fuF9a3EwnAuzMuiF339lXz1Z/a/hf/+xjcS7ciL/y3X6oFF2Uc9JKkOxyOl4VhkfbHwkrA0sjcuqB5Yy7EoLh4+LGyR1OiL114V9hjweGRcUjKy0S9efRXzU1PSj8AigAjKSDAofXk/tj/9v5/LOCKTRcICbrJ3nnvj3/8dB370BLqqa+H33n0AxJYC8ebf1vmsgUWBnII2hfe0bC6L8zfi8lXpoHPD/l3GIBz+GCwOH4yLLoxbvCgyzGMpEkU4GEjIL3wogobH2Eix1P9a8yNomUBkfkjYD49RLlrWffkiUKv+K8syZvKxFVl0/i+CfjQscpU2VkzmIudWYvKC1bXS9+Zq0nzIem+ursDrdIjMxEaWyLnxvoqC+l0uOUcq7LY7MD1tQklxLZb8nrsGKr6DaCSMSHhJey/hQPJ5vof4ec5/K2w6CVipu7xU8Kw7nyKwq/P5nXO42DqL8hRgpet/tWseOXVjyGk242y7c0svJuw0wVX1CSIBD3zdV+DrL7lnpD+pLfmFsnFh2JYjS3JsjQr4ZZHUedOMEVcuF+P82evobO2+a/Pkh/LpJ5/gueeexfTUpHCHxBzDQYSXQvjLRx/J+b7eXqzouEBGYHGxa0c9stBc8Ophl/Z70CmNv4XKDK6dVwDhsXT9Cw2LAqyiHkvG/jd6SN2MyGk04XS7G35/9i8mMFqL4HRH4jd3iP7RunsPrNDWm3F6WoDFVl5Sd9eA9dvf/AaPPvooPjh8OEFVeY4fhtlkxHe/+1088MADaGtr1USIJb+ATm1ShKvEKZ06xzF23Qk9FnVYZIWFvdaM/csH7DjTOIEzLSacbrNjeC77F+NpO4eI35F0zNudD3ft53CWvA9X+Ydwlh2Go/ww3I0n4OsrRmhuENGQB2HPAsKWsXsOqKiujQ+PJcAVDnjuGrByc0/j5z//LwESASXsfiWGY8e+xr633sKePXsEWNxdE3xejxvG2RlUVlZofWKUHZekj9PpEFHktuuxKobduNIxJ8J7Sb89q/5lgw5cbDfjZMsiCvqzfzHu6k+29CJD8yPwD5bB13YOvp6r8PcXw1ny3j0HVDTeCKaL528IsJrq22CanrkrwMrPv4onnvgRGhrqE0pfu90m52pqqoWiEViUw8gyn//lL+Xc7954Q/pdvHhBwBSLRvA/r7yCzz/77PbuCgkqAkrbEdq2rJ442WzB2c7sX4yz9NAtv9zQ/DBcNZ/dc1BF4210aCRBtdiGB4buOLDy8i4jJ+eEAEUT1KPo7OwQSkXqpIBFysRrDuzfn6BM5eVlct0CLSOxqFxLue22AYsadgWq4v7sQaUBy4VzrTM42byAKz0eLGXBBjytZ+Gu/+q2vGD/SK2w1XsNqmi8uexW9Bv6BVh5Fwux5HffcWBROCf1cbtcAi7KXKQ8a8Bqg8vpxIMPPihgIgtkIwCffPInQu2WYzG5trm56fYAS+mtNFBtrLtK13j9iboxHK8dxcnmOXidVkSC3s1ffPmfEbbdHjYxOTaB3u5+2IoOwbowL+zI0NWHzraeewqugd5BAVZl2Z0T5PXAIoBee/VVYWt+n1dA1tPdLf8rYDnsdvzgBz/Aiy+8ICxPNf4m2BSwCNJb1mOVDqyBikL7VvpTvrrSOYfjtWM4UTeBCfMivM7FTV+Gf6AcgdGGW3qhc0ajLFxLYwfKSurQ0dKNsWsfob66BQsmE9qaO1FcUAP74kKiz+zUNCxzcwh4XXcFWOWldQKs2cnpuwIssrGSkmKhPgQXwcJjwYB/HcUilVJ227UWQywaTQ+sreqxSG1SQbVVPRgF/ZyGGeS2e7Gw6ETQu7kuy9N1FWHX3LZeJEFhMc/BsWjB4vw8Ah7tXkv2aXg7L2rXBbVrF+fm4LBaMDU+ie6OXhQXViM/rwzmmdk7DqrBPo1asU1NTN4VYBEc3Ont3r1bdogFBTewurKsA1YrIuGwCO7vHjwoLJNgIsAWLQuagjUaWQPWdvVYhT0W0VXRNaak37ZtPRiVqScbjcht98Bms28qT3BX5yj7YEsvz+eyY3RwFDMT08g9dQ0lRTWYHp9avwkIrpfrfE67gItjqGMdrd1y/E4Cq6y0VgPV+J0DVTpgESgEDXVXBBn1VnpgETyDAwNC1cg2qTylIM8xqExNAtZ29Fg1o15c6TQLqIoMi9vXgw27BJw5DUac7/Ii6HHAtwErDFunRMu+HRmKoJo3meB12pPkt/DCKBylf9oSBQz63MIyZyaSwXk7W0drtwCrt7vvzgIrTqWs1sWE0Z7/U6Wg+akFBWxjo6Mia63QU2QlJteQbVLPRbZJIV5Y48qyXEswbkuPRVUC2V+BYTHt+coRt7jO1Ix5candhKM1w2K6KRmwI6dhHMdqR1E96kVBrxVnW0yyG+yY8giwAm5SLZcAgNQr6CF7dMlO0VX75ZZfns2isb1154IeuBqOb2tBKG+dzaUSM3mT4XHYBHjRbS704pxZNPDFBZUCLMp6dxJYYloKB+N2Vb9milK/4yYoatX5W3ldSB9xuIwJyNg0jbxmrOa1Ib9na7tCAqV4wI5L7UYB1qUOM45UDiC3eUrO53XN4Tdnq7DvahPKyBqH3fikog9/KesVMF7vscju7+vqYRHYCbrzrSY0jlgFVKr5nFZpAbcNQY8dAY8dXpcNrm0oMymMF1yrTHsuk/7KP1SFkDk91Whr7koS5LmbJKU5l3tdZLKtzpM7Ur3+qqK0Dn53slXhfmghnxMBt2MNWJWjHlw3LCYUmzcMVnxU2ovPqgZRNeJBcb8Dey/V4c28RpxpmsK1HgtONk4IsPK7LZraYciFYgrxG+wI87vncaJ+GseqR5HXNoF+QxecdoLHISzJO9EmFCvIpgeaYxHB6U64ao5s62FrKhrXyVVszpLNFayB0XoEZ9Mbhd12m4BL/e5qN4js5SSbKKrJqDJJbXmXigRQly8Wormx7a56OdyutuRzaevncWBXQZ9VgHCosAOvn68RRSVBcLlzDkdrh3Glaw514wHUjPo0gMXZ4Fb1VWSVpE40Npf3L2LRaoWj5BACLjv8bpvor1yNJzXbXskhOPi36hM4647B3Xgcvo4L2/yC3GIaCaXZFLibTmJpYXDDvsGpVvgnmjc8PzE6LqyPO03KcJGgD26bVdQZWwJ+VaOwVkWt9JuF+6WFA24RXbwOcho7dtWO+1AXX/hs9FiFBm03SHkpk56Kjn5kk6RUN3qtAqoTdeMykYDXAZ9Qoc9lQum+cB5jC/u2zxIG+4Zg2kRF4CzemGqFTD0IjNVveH5kcESoIUGxYDbHX7BHqBd1XtnMz+Owo7mhA0P9Q6itbhJg0Rh9r4Gy/eZFyOvauh7rRvc8LrbOoLDXsqE/lup/vmUGOfWToqcqNZhwqn4MPZMWDTTxiXi7r8I/UnPHHpRy0Ga6J+42PRuYhkILw/B2X9l0fAIilcIEvS7U1bSgqqIBeZdLZDdKyqm/ZnpiCsMDI9JfGZv7ejQzTk+nYQcA5NbalvVYBT0LomYoMFg29MdS/cXPqmEaOQ2zqO43YnDGAr8/mTI5NqEYt6NxV3gjv2LTa7yG6/APpRfw6YKzHYo5bzRhcnwCLptVtOekQgSYYqFFBdXwuZLHVbvBgb6N2fP90rasxxJVQ7tJZK3N4grZv2rYhbwOs+wATzWZ0k7AUfL+HX1A6/w8Cq+nB42+uao+RthnS3POuy39WVTXKIcZp2cwOjSKsaEx2T2mU35Sb0VgXbpQALfden8Da6t6LOXiwrjBbPy1qEylEx/lq7aJ9V++u/kkfIbrd+wBSSW4e/PHzTcbtQj1WpUfpz3H+QU2EeKzaS6bFVcvl8JiMm0of/X1aMCiMH+vgXHLwNqONwOVnQRX1ag3q+vzuqi/GsPpxskNXYxd5YextE0bYKbGhWysa8t43UZuOEumPvj6i29pDuGAB00N7agsbxCQpbuGdkECq6Sw6n8nsOhvJSqHLJz5asfWPBjOtWuC+0aNaobb+XAUmKfHJsTo7LJt7jUhADIPwG8oWHfc0/C1OATe6nzMs7PrhPh0fu/lpbX/O4FFfRaBRcqVjf6KbJOs8FTL5nJDaG5AdFZbfQilltAWzyhGZ7fDBrtlQVQB9TUtCcE5U0tVmjLyx9e7Hmx3ok2OjQuwqsrrBYR/U8DK1p/qaqfmLkMzT6b+dKk52WjCyUYzvL7NNdJUPwSzVD/QXNPdYRDlJJ31ZianRI7p6eyTXRmd9foNA/C5sg8r87ZfQMSngTBsnYS77ous+9Kulgj5iiaHfGXT+HFciWvg2fh86tzwwLD4aN2XwNqKPxXdXbg7rBhyZ+xPYJ1uprHZArMt86SclX/JavLVFY2yy6LGmxSJZhvuvgQUKQbirJvPIfkgaJZwN5/aEqhokGUQan9DvZYdZxt5GEwzM7iaVyLAosuOOn7tinaMO0r+ZhDsjgbWdv2xCuL+WIwhzNSf5yhnkR2e78j8QoLmgYyKSTZ6gE6MTaQ5pwWE6puKl2NbjgTXndeDwF3/JcJBjQ3yr1j2l9KMqaKtJTo6JmH6DJ0v+vorLRw/PiavS+2jP6anbDQJEUCM1lGuOYP9Q8i7pAW0XrxQgNrqRlw4dwNlxTWY36L56K4Ba7txheWDWv6rqx3mrPoX9dtEgD/ZNJcd1SrNrN/iIqTT90j4ktkkSTnY5sfHsRLTXGjp9sHUReqcagQCqU6MLMxrhWnQgPHmGkwP9GPJ75OweaY10vdhOL2iVKQgzMnAZCB2s0n8k1SYP118VR8tVD2YOMZrJZRdN//qioYEuHq7exOsUUVLp7bujp6dB6ztxhVKqqJ2k1CibPtf67YI1brQmdlvPDTbKTquza6hbqqhrhUhb/JOiwvFRWaaIibsYEIPJvBg2iEFOmZ8UemMmKKIxwg8y/Q0ju3diwOPP4Y/PvoI9j28G3kfvIeVSAA91VV465GHJcXS/sf3IOBxSwjUWFcXPnz2mcRYh376lGSmUUndmEREpUFihhkeV8e6KiuSQtvZgj7XOvDQ3KN8vqjFN05No6GmWc7lXyn929gV6neG17rT58BK1+iWo4XSZydMezvz4B+p3vSakcFhcWFJBywuNJOsMfnar7/7XXSUl8k5fVYaZp9hYxIQJv84884BAUD9hVzYxvsw1NyE4ZYmRB1GRAMeVJ07h1/9y79gfnJSEoYwU837P/85Dv3sZ5jq75Oxc958U4Aridti4QSImF3ms1dekT48xjmkAxZbXdwgzdbesuaeo2+klKUlNXKNcdb4twGs0kFH1oGpF1pnUTHswrUeTe2Q2559pIu3/Zz4YUXSKE+tCwuyC0w9rgeWe9GSSKqWCixSFQraTOfIRbKZTZLk7cyBAwi6bAguTiPktAorjLoXEHXPozoOLKY7ikWWMNbVKUnTeDwWCQtIJnt6tGPnz4m7rwIWsxKqLIPMNrMZsOhNSkF9s2hoUt/hIS0sv6G+TfJv3ffAKoz7ZaVLVZTabnRrnqM59eMCrDMdni3lJogE3PA0HYen8TgifmeSP3tbU+eGwHrt3/5N8lRxUZnakZRCsUKVnY/nvnr9dZGJrDOTQtmKvvoKc+NjOPD4HmGjR155RdL5hGe7koEVDmGkrVVyY3WUlSJC11xdTtLCo0eTgEUQMVMgWSWp2WbAyqbxXsFAQIB17WqpfBw7BVzb1mORBYpZZ8STsf/FNqMA63jtCK4bHPC7bOLXvtXJRpxzcBQegK0hF31dBtFbUebYCFhCpUpLZCFLThzXkleEg0mskJSDslI0HIJ1dkoyB55/dz9sEwNoy78kwPr4l88iSiWsdQJVp47jV9/+NuYHurA02Yyx9la89K1vCeCWqcOKRYRiybEUikWKSRmL82LqyI1krGwbPVWrKhq1wNbyhoQP+k4A17b0WMwQwx0hhXe90J6uP50IqaHnjvB4/SSMFpf4sWeKH0xtpHD0AafAbpkaw1TFKTiqP8PSfHJugyXbFKJOY4IVUn7iTo0siEBKTSnJ3ZzPbhc2FvR5cez117B/zx4MNDbANjmIgz/+ET5+4QVEfXYE5kZRlXNUA9Zgt4zlslhw+OmnpbEP73dq3z6RsbTdaDKwKMcRVDzPzcV2geV1OZKF+96hBLDY7ks9Fht1WJfbjJv6Y7GV9duRUz+GnPoJnGp1YsJMYDkQ8GxNwdfW1IGreaUSG8go5sQL7syDu+YzOIsPijeopzkXEcuoCN/c0VGNwEZ2p7Ies5HlqVSTZJlWkxHh6XaYe9vw0bO/wK+/82/Y9/BD0j5/9VUJH+8qzsfeH/4AL3/rW7Ir9LtdWI5FhB2++9RTePtRLTXkOz9+QuQoqjj0u0KR8WIR2VAwhyrvfSsUq7SwCufPXUfB9cokUO0IYG1Xj0VqxZapf0E3qdUoTjZM4mTzIoaMGrB8rsw5GvSNphten02Iu2TLi0URCfgQnR8UChah+3NIi5O7ubqcSELLtuS2I2qbhLf+SwECj032GjDW0YapzmaE5kcRc5kQcZglHWTIOqOlhYxFJOhBqJLPi4meHtG8BzyepNSKXGiOSb2X5JFajiburY5tdeFoxlLUqq2lOwlUZIVbzRm6Y/RY1F9prNCXsX9RP0PGNJ+sU80WoVaUs+iAn+1EGXQa8m0vcoW+VAyc8HbnIWQ0SICEs/4LMR3Ric9tKIJ3pB7Oms/hKHwH3s7LYhAn+w1NtcHTcAwhV3KImr6FvE7RPan0kMui6b+zC0sfe4KquKBKlLdJFIu56e8hqG5pV5jwyRrJzieLDoJXOucFXGfb7YmwrmypFpN3+FNcebcMsPEG8f3yT7QmjlHWC7rXQMJIocDCBHxT7fLbWfslnBUfJwHJ3X5xHbg2iuCO3qFm6NI08oU3KhLAunlzBTdXV3dErvhtA6toG2FgjRMelPXNobRvDm1TPvnSGfoVDqzZ78SskmKXm5maQXurQVhGOhufssGts/2lUI3Ua3ivBNXxucQuuOScg681F77283A3HYez7E9wFL8bv8aNJdskgpOt2rV+LXpbmte53oYYWn/PTE3NOdnOufYc6lhXZ59o3IcHx4S1//Wvq4mcoHLfpHcYvH+AVbkNzbvFG8OQYQCDPQOYnDTB5g4iOFAC+9yc2M2YXF+lx9Hb5CYMvZgeHBJ5JNXGx0ZTDdNiq98ch+mwVdpDGqW1JKyajonqAGXrI0AIDOqkZruaYTR0YLanHdbxAUSdZoQXx+Hpvo5IyC9JL4y9nZjo6sT04IDISOzH/tFwUOah2QOjCTDweTgfvd0yna1Sbzdk4/w5V/ZVrI2GdO5ijUNDGOk2SFWLUCgoKhNeR9mOwFQ5RDkmx+D5u03Fbik/FkuaaEpSR1b97YFlfPDsc3jhH/4BVfkFmHaEEVkYRmlODl78x3+UUiO0vVHwpUJTKTHffuQRlJ46JX5V3F2pciXcgfF/qRCxuiK1a5jEn8eYtJ9lT6i7IqioHKUaQClFqZ+6cPiw7OwENAE3jv3u9fg9H8G7Tz2JvA8OwWfW3HKCXg+ufPwx9u9h/z1yDW2K/ChYboXUlF4N3BFGCLi4NwU3EdyNchfKsa9+8glsJk3dwcbj6n/ZNS5rCWR5Ha9XNXuEkrOY1OAAXv3Xf8WBH/8EpskZYX0zgwPSn8BWuRVY4kWVZ6F14W7LXbeUH0ufyY+K0kz9bb4oDj/7HL544/f45FevweQMw2caFT0RX2AqsPibfk1cPCsDQqNR7XdcD8USI/xNs40CFitQ8OtlX7XIHI/1dWiuoRqAfai8pJqh7vJljX04jTj2uzfw6csvy8Jf+vADUS04JgcQWRhC27VLeO1f/wWFXx2V+VDTzoU///57YmekcjQ9sCIyP+qt+Exc8OjSksyBagcuPFUO/E0qxefnX4Kf1cd4nue0ahoBjHR3y3O89p3vIO/jj7HChLPxqhoKWAQRQaqsCvyg+IHpXYfuOLBuNc97Ye+ixA/mtTN03rZpf6s3IsC6fuIU3v7REzBPz2K2swn79zwmpo5UYPFLV3VvFo1G2K02kRdYrEkBizoglW5HAYushkAiVRJ1QsCvmWZefjkOgiVhGweeeEKAFHHMImqfEgrE37y+tbAQb+5+CM6FBVErHH39dflNyicULrwkx+jt4Hc7ZR7pgBULa6xKAUvcaeLyJAGkgKUBR8uf3ltXK+Ch6iK1/B2Bte/RR3H10yPSl6xODyxaFkglv37jDaHatDzwHO+1HbXGtoF1q3neiwwW0cJTYcrgis362/wxHH7mOVz98mvse2wPRptqUJJzAkd/8xpOvbUXn770QhKw+HL51bENt7VjYmxKFiwVWHwQBSwep32QLJFGXx5XwGLtHE3+CWjHnngCf372F4gGqCoIC7CkLN1TT+EPDz6Ij5//pVAYAov2QgIr4HZJSgDKZyf37dOA5SKwIlkDKyrADK4H1pJfnp91fFipjBRNlbNT5e/GDb0CrOmhYXleUiM9sHgN5TjOg6KAMiGx3qKmOPXvcH+seH4rpSi93rOA6hT/99T+lLEUsL5+622cO3gAHz3/vJhfSGk+feF5xHy2JFZIYZUL47I7MTs1mxFYfNF8oTyvBN+Qf41isUgSv1zaB98hxXrpRXHsU8D683PPoeT4cdRfvoDFyTERzhXFeuvh3fBYTIguBcUo/dUbb8Qplms9sMJaI2VaB6yl9MDivMg205W/04o8RRIUa2Z4RLwzVEUzfnxS5m4lJuPRVpno/8AD4q7DZ79b1cV2bXdHmEcFaYcZeZ1mkbWy6SfAelYDVlNJmVCMA48/Li+NwOLCx/wORMy9OPbGb/Hpyy/BY7PBubgIt4M7r1BGYHEcUhk63vFLJ8ujHELWqErDkb3VXrwoC1Zz+riwDg1YvxdWKLtF2ySWrFOiEiGwWm7ckOuLj34G6+wsuirK8YeHHsT5994TtqgHlnvRotkgnQ6pVkb7oQIWQabYdyqw+BHQhYdgoSzI/9nYl2Oz/N1AW7sAa35iQtgyn5kUmn2EYsXZIE1Gqj+9LPjs2k54aWcCq0oHKpY02SgX1qbAOnoMwwPjAqwPn3lG5B4FLMUKucj60nFlp08nar1kAhapAusTkh2WnswREwcXmwvL3Rx3mVyIs+/sh2d+RmSmaCQkFItz4AL7prvh7SvV9FfTnfDOTeDy+wfxx8dIBR4RkNGGaDWZEmkWufj6OX/47DNiYyTA6WpD1s7dnkrDuA5YK8tCcXmM81VVyFT5O17P+oYElnlsTO5J4BA03IgQWMo7Vu7DbHtx2yTH5Pu6W3bELQNLucsQVFvta3bHMG/3wGT1YNJOFuWNl3LTlW4TJV8YThsTy9rhdjoRXJzSqMdYLVw1nyIy14+Qcz7B1jRgrZV6Y38ukvqdUByGl2AaGcZoexsWJ0YkvIs+VEGvQ/ror/dNdcJjKJBcT5KnVGSTIGxzZulvHB6S8WTc+BaflCu55F1AQJ16TCiWrlyeUEyxb25e/o4eq3OmBcwZ5xD0ayXq9CX3VPpG/q/mJj758XJ72r0i9wZYm+mhqGWXAAr6uW+jniHzjuY2z0pARb9p40nRPWZ8dFxC0heM6ZOJ+PqK4Kr7QoovuZtyJNDV3XAMroMBpbkAABeKSURBVPqj8PUVbjCuXbT8QVYNm2qTZGxMOZTuWlftFwI4T/s5+CdaEJFwsuRycVrVq7tn7A353GLGYYSOSiW+U1vWeizxaOgwabu/3sVN6xVupMdi6qMT9TM41bKIgH9zyz1zR22U42BdS7E3Bmd7hLK5649iaWF0DYwTLZLdJuzIXNXCUXxQ/jqr0icKuRfNYbVo0Tp5JXelOthd0WMV9bAG4Qzyu+Yy1itM17+0z4ZzzTM4UT+La4bNXwq33aYZE2anZ9Pb/dLE+KXGDqrmHyiBr/0C/PRsGKvdZBzdbmnJD3/3VYRGaxCxz667dlP7X3S9PTMpA3Eae+LacwfW2TKTzoeD6O7sQ011S3yH7N+5wMpWj8WQemZLZjbkTPUKU/szvSSVqCcaZpHTvHliEDaxFY6OYMzQi8m+fk3zHJe9eJ5yAnU1VCeoxt+pgqls4WNROU99DoXYRGneuIaa57gr1RSIocT45r4OGHtaNW14LJx0T8pN9FnX31+1oMeT9FvZ/wgKykO8F5uKSVSA4j30c+UOLiEnxedKh8GRrm70NrZgqn8g7vO1tDOBlY0eq3LYk4gh3Iqeq3rMh0KDFRfbNF+s8xmyzawBS9Nj0Z34rYcfxsEnn5SwLG6vRTBfjuLC++/LLkvpai5/+GFc+bg2DheCagalZKUuS4v30xaEW38eY39RIC5rwIy55nD24AHxFOV9tJ1qVHac1AdxY6Bcn7nbUvGLmu5sRO7F2EOe0zxJtV0jQcMdnNKYq0BVjk3QcmzOR82XO1pllOeO77Nf/Qp7H9otu8KDP/mJnBdLwj3wXsgIrGx2c1IxdQs7QV6nbIiX2s0Cqstd6bO9UIvd1zMgCckYHKEHlrIVNl67Ji+SWmi+SFImLjh1NaQIyl6YamhVNjcGUvAagkcFrXKhaSqiSuLcoUOypefY4kG6MIizh97F7//9+6KW4HVcYD2wqCvjmASOil+UfA3RiETwvPLP/yz6I9FbxSs6cB5UiRA8YhWQAt9BBD1uuT/nomyZNBxTo07wcTfH97H3wQfRUlIG8+SkfDBUfFKtshMc+7YFrAKDBpTyQVfGa2sZIR1PD3my2YyBWQu8dOfYYAJM4jE+Mo4zp7XATKZQ9Hq8+Pr3v8fHL74Il9MNn9cni6IiiWlwVsBStkQFmFRgkTpQn0S7G9UTyuZG8HIMAo/9VeAFxwgbuwVsn7/yotjbCCZSPwUsqSZKm1w0nACWytXAY5apNWCJ607crMP50iZKHRMBplGbJaFk1EPxOHV0SjVAFQw/AAKN1PnUgQMwmxYQ8Hvlg+Ixmn92go/7loFFFqcUorVp2GU6lYSkLGrWXkCmCRBILEmiEpIN9Q8j6PcngOVxeyWChizs+W98QxSCClh0OVFsg4bb1BwIfOGkUjSR0BuA7FJsbsvRREADv3wuLDXmpCKiF5rtEGAdefF59NRUCyXhX4JCAYvjpwJLCeeWFGARHAQ2xyGIOVcCXsLt435TDHDlWPQVoyadTSl7VfDH1SOfYXJiVjY1/Ah4jFT8vgBWqh6K1U8JKpYryaSnYqNv+/H6WVzoyC5usLOtG15ncmygnhUqGYMUi6Sf7EFPsSh30XQiwQ0pzmyiMIyHwbM/v3C6y1D4ZugX5SAlG/EcAUiKQR8xAou2S7JYasN5jse2A6ybK8vyP4NY1f0IdLrF8FkIbIaUcY7sy4+BLJigUcDis+cePAiTcR4Omz1xjO9hxwMrnR6KpU+kcPiAPW29QX3/yiEnchtnkNNoRK8xuwkUF1RLkrSNgMUvmIvHF81jmlZ6TcYiaLSgU886WYOAY1/KPAQSNwNcPC4mQcJAVsVKKQhzoXi/mNOYABZBRMrC+xNcmwGLDoEEwoJOxuJ8l/x+Yan0jVL347NQ1pL5O53yrKRSvD9Znx5YZMNijnrsMTQXaR63jE3kx8CxdqSMtZkeqqCbLjGzuCKpihxp/bH0/a93zyOnfhanWq3weDLfnEo+pnG0xKs6pAKL9jayDC4A2RDJP9mK2hXq7XLpdoWUsdiXY5AN/eX552XRfU6nHFOsRkxIC/MCEDH2Bhw4++67CWApisP7pAKLG4t9jzwCj9OJ4sJaLMyahDXTI5Y2u6br1zHa0SE7R4JQVSSlcM45kS3SrZrgJdD1Xg1qfkot8sEzz+DN3Q/jD7t344979sicCLqdEDyxDlgb6aEYVZPws4pr2tP5Y+n7XzdoaYpOt2WOpmGGmMqyBkmHmBp9o7ePrdnJlB7Ln9gp6ZsSdPXjcFHIykitSAkUVVP2NdVHb7cTluqeQ3BhPGE3FKWn+Mev2RIZfhUO+hHyB+Bx0p8rAofVCpuV0doeBH0+uZbyobLV0ZaoFKi0D67NgbZN7RoCjPMlkDTvV81/jH855mBrO3rqGmA1meNeGfeZHou1CKm7Kuy1Ze2vld+j1cu5YXBsmhq7prJJzDUjQyN31uYVNw4n8oKmidxJ1wJjDfB15687zrjGns5eKetLO+bZ3Guor21Zd53XaUdpce3W0lXGfbTUXNfZIuPnbRYr2tsM6OzovauuxlsGVjoBXBUJyOuYk3Ta2agkyodcOF07hpyacRSUtwpwUmMGmfqQi8H6Mff6wTdtARcmr38o1JSBsjzGOVMtwsYyKpnGmDOa1pU0udXG7IUVZXV3vLr9HQPWDVIrEdjXom+yiTPMqRzGqZop1FQ1S36FKkmWvyglP2ormyQzzE4tmcYYQeai4sdQWFCNa2cviWcFMzCTyl44V7guwdtGzeu040Z++W03FA/0DgioCq5VwO2w3l/AqhjS1AtancLsqFXZoAsX4rUIS/o1NQOLQjY3tkvF0fNnC5JSS++0xrmRwgz3D0uxAUNXH8LWCXgNBeLCQ8vAVku91VQ0ot9we4stNdS0CLBamjsSZezuG2AxzbbUI+xPn6kvVY8lmva42Sa3dX2YOStdnTp5VTLv7dRStBfPF+LyxSKhqAkqE3BnrMC6WfO7HFIn8XaxQ6dNc5lRjT5ZLJBwXwCrqJeuMbMSypVNXCEpWvWoL57DfR4LzvQ3GRkcRUVZg1AD2gbVcTrZpauCdS8aqdRgSjk3Z/G7tzTmzOQUpsYmt1zGd6PWWNeaABX/7mRZNaHHIoWivxX1VhVxX6qMcYUDDqFwp5pmcbLZuiGwVGMlUbIV5tbkIvb29KG0qEbq81GXRbmMVC18D+oh06zEsm/6Y9spbp7a+g0Dm1Z43WqbGp9YKz93vgCL83M7E1iSoa/fhisdJvG3Ukk+sokrvN69IBQup9GMsx2Zv0pu12kTpOH5zOlrqK5sgnF6VgR7JqplMQCnbVESiakKE6ktm/xYWwLU3Jzs8qbGp2AxJcstTOZ2q+PnnszH2MhY0jsgu72VYuJU/CqW2NXeszOBRZCU9NtFZ8Xd4GZ6qlRjM/vQf/1Me/Z5rvRsguBJV0eQ1Oz0yXwptqSO8TqqK7raepLY6a0sDgs6Ufa7crkU5SV1Sfm3QuYByTRzK/ewmMxoaexclzeUHw9luuLC6m3tHG0LC2nr7ew4GSs/nuuqcmStLk6mdr1nUQpcnm5zYWhuezff7KWyCDerwXOLT4BdulgklIUA4NZ/szTV2TTW4NHXitZTEAZneFpyb/nl+t0OkSGprmBGwrlZo1R85TnKXcUFNdtikxQlCKob18vvOYA2BFZFXBnKHOxbii3s0HaCZ7JggdtpfPH0z2puaEdDbWtS3lFSgVvZyrM2DWW6dLtUb1cevGNN8DoXEb4NlHFseEyoCsFwLvdG0gcxOzUtOr6tjkmPEEWxXPbFnQksYWlbUIZSw87ruRNk/cE5x5116GeIVuoxye/e3JmWJdJsowy9+jxVqnW1G1BRWi8yVbrUk+6az+Fzamkhmc6SIWC361kCKfIhgcXNzFbHUcI7W2CL2afvGrDWCgE4svK3utFjwdnmWZxqXkTd6J2hVtk0ssXaquQ6zVp0S1gifpVvU6rln6DcqEp8aGEYzu5rSSkg/fFsfXfiGTwOu8hbW9HvkWUrUA0P3nrV1zsGLDE20y1Gp0bYKC7wRs8CLrTO4HjdNHJbNifBKiWPvulDtFLPaS2cFGqlXGSkb8IrYO16p8MJh1Uzs6goGDrJ0e2X7igqlF3uF0/uHw4FYTaaE14SaizOy9N1DV7TiACKBmQmBGFjEhDmdpBqXolQrvXPp55xJR7VoyJsNnpHBFRJYQ2GBoa3TK12et3oXYxqZmhW2YA9Y34s5nWnv1VOk2XTgFMFHLoRMy8BGx3SJOBhRUtTzfApdU41OuypXFe8lseYG4pJxOgvxex1HCfRp6IcTpsDI0Pj4mJCVxNSKzZGwUi663h4FMdmn46KCgS8DO33J46xH4HrrPoEgXiiWwKJ46s2aeiBy7KQYK98Pror6+cvYI676nRVVojv12bhWZPjE6irXu8dkUkvpijW7KRmIN+JbdfVDppwZiSgNFN+LIJQIm66M7MGvng6otFxjQ5sdKzjX6nWEI2IizE9OumVyUYPS8kbuhJLRM/QYY6BEPSsFH/0m6viIEfnPboVs1RceCkEt8uD0lOnJYqFVbj+9PTT0r/42DFEQiGRp9w2m9yPLsEjHR0CXhVswUgXUi9nyfsJFqjSGjEn1ns/+5kkEmECEy2dUDThbKh/BvrPK1fit+OVLzbzl6KxmpuTraYZ79IJ7+aZmZ0JLOV3lS4CJ1WPRXnsVBNVDE5YXdkBi6BgqBQd7ehRyZetgMWXz6+aDmtSqHJV+9rp6ckF5zV0juM1ynuUC6fSPtKFl27GBCvHOvXHP8q9qD86e+g98bRkqTerxQqXzSa/WQKOICCokoAVCcNR/mfJQa8HlmT8WwpJ7k+6QpPNMlyL81Du0ZqzXjTujBjJGlhs3O1yh2rPwhVH37hjFu37hYJ1Hrg7oe1SMYDc7WXaEXLnyGAJ7gav9mYPLC483XK5iIxWUcAiVaErMAVtSbGzqmUYZsQKk6fRH5x92QgulSBfAUvAthwVlvT83/1doqQIZZzB5mY5pgJGCSKVCJfRLQw4JTD1FMvdmiuJQ1g1gyXjFLDI3nhfzpHpiPgMKqBDFYBi0z6a5HqImYBFXd5cXFF77Uq51LXOdvFamzoEXE11a3nrd0rbxSCJbPO1V41646qGeeR2+ODx+jMCi/FyZGkEkVYNK4qVyJIAi3GCZGcM1pR8TqvL60Kh2JcgUoEF6YBFQBFEZJMiODOlYleXHNNyaK0BiyBS8YQErB5YrniRc+rQOK7Kl6X5xUcSIWi8XgGLz8X5s5GFbxVY0XibnpgSIz31XARaNn1Gh0YEWFXl9TsPWMpbVIV3Zda4W5DbrGncpxezp1iUi1RAJl++nhVy4QQ08fwIlMt4LcHA32sRKyvrgEVZhwtNmYtUSAs+iAkV4zFFxRSwuKGgGoJjMvxKgY1zchQf2jAEjfGIDNggIAl+fQga/d010Gt1oO0pwFI72mwWhMpUvTKYfmA0PKfuJvt7+3HpYsGO9XIQW6EKh89Gj8VInHOtmpzVMZ0dsBjEwF0SKZRUM13VUkjza2dWXy4+m0oYRhDxWgrsXHT+z2OMByQouKAqVIsLyt0dhXyCl1SRuzMlUKvil3pgkRqRdVHwJvh4j6hjGv7eonXAUvniGQ5GMBPUIg/GQ9AY6KrmTyrJ43azSSgh56LO8f7ZZIehbou5wbj7Ky+tTQjpPZ0GTE9MCnXKu1SU5Js1MTa+84Clz9LHyvSZ8rwzjdG5FqOUiGuezAwsyiAECwVe5sbkYlPAJrBINRgWpYoBaJldtJByho6rnSGpBmUx5vMkO+K1BBvHVpEspGwMEeNCE0AEoraDi4nuSeVxEGBRnoonkSVYCKzgYHIJYAUszo2bCc6dH4eEW0W1Cl4C8Pj82VQImt1skrmr43xOzi8bYFHGKimsToAm72Jh4v+LcT8srfBlHaorGzE2nOzqs1PaLoKJeiy6v5T1WzPmeS/qtWjAalncFFhiWokL2yJQS47NtepU0lJq7EngZVxHxN8EINkdA0+18ynXx8dW4VEq3EtLEKKNpxSyifsxj2lcuZkYJ7okebSS5k/wrJvfWqk4/fMlzSeepHY13bNlaVGg5wPBQ6pFTXtrsyakq1ZStLOVowKsqx1m0WMVGhayyvNOmex8q5abYTNg3U/N31+MkLn/ns8jGm8KSIN9a7ITlaFNDW2YGNl5bC8tsFTeK9YdzKTHUsEWf2vAclV/cs/nEE2JEyCw6mqa7vlcttt2pRZZyhyR44wDa2NWqLej6bfbKi/VettaGptiPNtduvPaNenG0vJbpbuPfmw1F8WSA/3Fm8xxfdJ93kPZMRO2TN01y1mMkWlnSGBReL+vgZVtmBcLB1DQP0OXmVY7hs3pvRv4MqlTorCrFQeK1+CLRpJsa7yGtfYoyOvtbRTelSzEv6k2RekXT76hP6ZSSq4uL6+z47HxmGar1GrpcEfaXngdsaA7sfD0jtBfz3RHKum/nJc5RcXWSV0b9WRUK3BzotIoLacZQwoZpKRZ2qjRA4PAakgTZX2/tF3MJpMNqOj9QBBepOa9eR4F/RsPSmBRR8Rdl+Ta1AGLOy2m7OEOjdtx6oO4HefuiVt7qie0ZBrXEhpvZmnhTpDn2XiOwOL2nrs6HqOqgf2khNrKiigseX8e4zn+r5KUsal77n/sUQF2grKGl2RnyR0n+3CHqap2ERi8LwHJcXmeag7OjWMTXEK5wkvyHByDjddSTaF2qJkWZWRwWIBVU9V4/wIrtVzJRnos2hTPtpiQ0zSPxtHNo5k3BpZWK4ZgoGpAqEt8kbmAXDxVRYFgUrtA/k8NPakfm2JBBJZK00ilJf9neh+CVa6NRkRVoMqqqb60PxIsJ9/cizcfelBSGCVyTMWBRT0Xlbm8h1KmrsZVCQQy50MKScUp+xM8osqIFyp498mfJFJUcv5UpGYLLDoErjnyue5PYOlthBv5Y/Gak/XjkvU4vyuzK+xGwCK7IXgUsNT2nMCi3ocLQY07AaKy6ylgESDUZbGJh0RMM9uoYkw0p6iEsMoPiv0VsLRyKVqSELIxgqX+/GnRRUl1Lb82Pz2wOA71ZNRhEexMf8RsMC9985tCbVUmGoKax1SitWgcWJwr50YQ8h7ZAItepdfzSxPASudBez+0XaX99ox52gsMC8htooPfOAyz3jsCLGrBFWXi1y1VU3XA4mIrmxwXSwGLGngCigvPe0ou0Hi53lRgcQ5ceI7NIpeDtRWJ7MeSSDZObfTA4hiSWPaHP0wClsp1pXKI8piqkxONA0tVgKVHhCrpm+ndcSdIQJWW1Iisda8Bsm1gFfZYMuZpLzZYcI6lSprnUTvq2zKwlL1MNN6pwIpFEqyQ5hdVlIiLkcoKEzZFCuDRpQTFohCvQKdkoXTA4m6OlIkU6Nff+Y6k+ubi09uB1EYSt+mAxfuQlXEM3p8OggQIr9dkJo21Emw8pqhYVEexCFzeg+YnDdzpKZbLbkV3R0+CUtFX616D45aAxSwx2eS/yos7+V3tdmcNLFISsQWWlsjuSGWuI5WhyUUVFyewKKPwOi6wSgupBxaFZDWWGIHjwruSsWi+IdWjXU+5JKcCi4BTbLDs2Jei0SeYmaWPYKLwzURp/J/AJzBUmmzNO1RLjkZgcgyeJwvmPfisqlhAVCdjqWzJqnpXup1hbbVGpVSj8H6vgXHrFCvr3O02LfFHuyNrYBFAqvHFRiMREXy5KPyKuTBqV0gqxutUymoCQJldCCz9WMqLgcDigqqKExyPO0BSB1I0XsP7MuWiACumBVq8+dBDGGuuS5hfVB5RCt+xSERAwfnQRsm5SArweE525cjHXSCfRe0aJd/6ilb2LqoDFo8pTw5JQxlnyapNjIwlAJV/pfSW4yV3lD9WJlCxJmF+94IGrDYXwsHNB93IjkadVXrbWnoboMrIl26sZX0/kXV094yzPb19UthxXC8WmetL6MnUsYQtciN7pFJw6myZpHbCemW3qd1TfVir6r4qHE03D/27aq5vE1DVVjbetztA1dTmiM/7/wHh1qlhASZd6AAAAABJRU5ErkJggg=='
 
-            tr_class = "colour" if tr_colour else "white"
-            img_block = f'<img src="{data_url}">' if data_url else ""
-            # https://samsara.apps.datacubechile.cl/Detalle?geo={row['geohash']}&dt={dt.strftime('%Y-%m-%d')}&zoom=16
-            html_rows.append(f"""
-                <tr class="{tr_class}">
-                    <td class="row-left">{dt.strftime('%d/%m/%Y')}</td>
-                    <td class="row-center">{np.round(row['mag'],2)}</td>
-                    <td class="row-center">{bool_to_tick(row['areas_protegidas'])}</td>
-                    <td class="row-center">{bool_to_tick(row['sitios_prioritarios'])}</td>
-                    <td class="row-center">{row['rep_1d'] if row['rep_1d'] > 0 else ""}</td>
-                    <td class="row-center">{row['rep_60d'] if row['rep_60d'] > 0 else ""}</td>
-                    <td class="row-center">{img_block}</td>
-                    <td class="row-left">
-                        <p><a href="" target="_blank">Ver en SAMSARA</a></p>
-                        <p><a href="https://maps.google.com/maps/place/{lat},{lon}/@{lat},{lon},15z/data=!3m1!1e3" target="_blank">Ver en Google Maps</a></p>
-                    </td>
-                </tr>
-            """)
-            row_date_pre = row['dates']
+              except requests.exceptions.RequestException as e:
+                # raise SystemExit(e)
+                data_url = ""
+                logger.error(f"Map generation failure: {e}")
 
-        html_end = "</tbody></table></div></body></html>"
-        html = html_head + html_start + "".join(html_rows) + html_end
+              comuna = get_comuna_info(comuna_gdf, lat, lon)
+
+              tr_class = "colour" if tr_colour else "white"
+              img_block = f'<img src="{data_url}">' if data_url else ""
+              text_color = "val-high" if row['mag'] <=-0.25 else "val-medium" if row['mag'] <= -0.15 else "val-low"
+              # https://samsara.apps.datacubechile.cl/Detalle?geo={row['geohash']}&dt={dt.strftime('%Y-%m-%d')}&zoom=16
+              html_rows.append(f"""
+                  <tr class="{tr_class}">
+                      <td class="row-left">{dt.strftime('%d/%m/%Y')}</td>
+                      <td class="row-left">{row['geohash']}</td>
+                      <td class="row-center {text_color}">{np.round(row['mag'],2)}</td>
+                      <td class="row-left">{comuna}</td>
+                      <td class="row-left">{'' if row['areas_protegidas'] == 0 else get_name_from_shp(temp_dir.name + '/areas_protegidas/Areas Protegidas_metropolitana.shp', row['areas_protegidas'])}</td>
+                      <td class="row-left">{'' if row['sitios_prioritarios'] == 0 else get_name_from_shp(temp_dir.name + '/sitios_prioritarios/Sitios Prioritarios.shp', row['sitios_prioritarios'])}</td>
+                      <td class="row-center">{row['rep_1d'] if row['rep_1d'] > 0 else ""}</td>
+                      <td class="row-center">{row['rep_60d'] if row['rep_60d'] > 0 else ""}</td>
+                      <td class="row-center">{img_block}</td>
+                      <td class="row-left">
+                          <p><a href="https://samsara.apps.datacubechile.cl/Detalle?geo={row['geohash']}&dt={dt.strftime('%Y-%m-%d')}&zoom=16" target="_blank">Ver en SAMSARA</a></p>
+                          <p><a href="https://maps.google.com/maps/place/{lat},{lon}/@{lat},{lon},15z/data=!3m1!1e3" target="_blank">Ver en Google Maps</a></p>
+                      </td>
+                  </tr>
+              """)
+              row_date_pre = row['dates']
+          html_main_table_end = "</tbody></table></div>"
+          html_main_table = html_main_table_start + "".join(html_rows) + html_main_table_end
+
+        html_end = """
+          </body>
+          <footer>
+            <div class="footer-text">
+              <p>Producido con <a href='https://www.datacubechile.cl'>Data Cube Chile</a>, un proyecto de la <a href='https://www.uai.cl'>Universidad Adolfo Ibáñez</a> en colaboración con el <a href='https://www.dataobservatory.net'>Data Observatory</a>, la <a href='https://portal.sma.gob.cl/'>Superintendencia del Medio Ambiente</a> y <a href='https://www.csiro.au'>CSIRO</a>.</p>
+              <p>El proyecto Fondef IDEA I+D ID21I10102 Sistema de Alerta y Monitoreo Satelital de Áreas de Relevancia Ambiental (SAMSARA) fue financiado por la <a href='https://anid.cl/'>Agencia Nacional de Investigación y Desarrollo (ANID)</a>.</p>
+              <div class="logos">
+                <span>
+                  <a href="https://www.datacubechile.cl"><img src="https://datacubechile.cl/wp-content/uploads/2022/06/datacube-chile-transparente-230x79.png" width=115></a>
+                </span>
+                <span>
+                  <a href="https://www.uai.cl"><img src="https://datacubechile.cl/wp-content/uploads/2022/08/logo-uai-230x116.png" width=115></a>
+                </span>
+              </div>
+            </div>
+          </footer>
+        </html>
+        """
+        html = html_head + html_start + html_main_table + html_end
         msg.add_alternative(html, subtype='html')
         msg.add_header('reply-to', 'jonathan.hodge@uai.cl')
+
+        logger.info("Sending email")
 
         server=os.getenv('SMTP_SERVER')
         username=os.getenv('SMTP_USERNAME')
