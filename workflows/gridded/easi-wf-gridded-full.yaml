@@ -1183,7 +1183,7 @@ spec:
             
             if not result.empty:
                 if str(result.iloc[0]['Comuna']) != 'nan':
-                    return f"{result.iloc[0]['Comuna']} ({result.iloc[0]['Region']})"
+                    return f"{result.iloc[0]['Comuna']}"
             
             return None 
 
