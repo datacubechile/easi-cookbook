@@ -41,9 +41,9 @@ spec:
       value: '["red", "nir08", "qa_pixel"]'  # json list string.
     - name: output # output artifacts are placed here
       # TODO Replace with values suitable for your deployment environment.
-      value: '{"upload": "False", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final_prefix": "products-index/samsara-raw/"}'
+      value: '{"upload": "True", "bucket": "easido-prod-dc-data", "prefix": "staging/samsara/processing/", "final_prefix": "products-index/samsara-raw/"}'
     - name: roi # Region of Interest
-      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2025-03-18T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
+      value: '{"time_start": "2010-01-01T00:00:00Z", "time_end": "2024-12-31T00:00:00Z", "boundary": {"coordinates": [[[247407.424332, -3759637.385689], [277867.505096, -3737215.441123], [280596.481831, -3699214.741452], [312309.956532, -3673526.659493], [321108.221115, -3644267.063299], [383199.002609, -3667067.688056], [398501.015932, -3655962.633941], [407600.280836, -3685111.715594], [429887.030715, -3688956.202032], [416885.028641, -3796345.042367], [375214.903656, -3770108.565469], [367636.557411, -3748604.020174], [309184.819133, -3786138.540799], [247407.424332, -3759637.385689]], [[383209.459182, -3667934.985527], [383104.304389, -3668305.530256], [383297.611255, -3669125.142956], [383667.561284, -3668776.244113], [383209.459182, -3667934.985527]]], "crs": {"properties": {"name": "EPSG:32619"}, "type": "name"}, "type": "Polygon"}}'
     - name: size # Tile size in odc_query.output_crs units
       value: 18000
     - name: tiles_per_worker
@@ -53,26 +53,28 @@ spec:
     - name: tile_buffer
       value: '[1650, 1650]'
     - name: pelt_params
-      value: '{"compute_pelt": "False", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
+      value: '{"compute_pelt": "True", "model": "rbf", "min_size": "3", "jump": "5", "penalty": "30", "n_breaks": "5", "start_date": "2016-01-01", "processing_chunk_size": "65"}'
     - name: neighbor_params
-      value: '{"compute_neighbors": "False", "way":"last_negative", "neighbor_radius": "50"}'
+      value: '{"compute_neighbors": "True", "way":"last_negative", "neighbor_radius": "50"}'
     - name: texture_params
-      value: '{"compute_textures": "False", "smooth_radius": "15", "glcm_radius": "7"}'
+      value: '{"compute_textures": "True", "smooth_radius": "15", "glcm_radius": "7"}'
     - name: rf_params
-      value: '{"compute_rf": "False", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
+      value: '{"compute_rf": "True", "rf_model": "RF_v04_all-trained_negative_of_first.joblib"}'
     - name: finaliser_params
-      value: '{"assemble": "True", "finalise": "False", "summarise": "False"}'
+      value: '{"assemble": "True", "finalise": "True", "summarise": "False"}'
     - name: delete_index_raw
-      value: "False"
+      value: "True"
     - name: delete_index_summary
-      value: "False"
+      value: "True"
     - name: index_raw
       value: "False"
     - name: index_summary
       value: "False"
+    - name: send_email
+      value: "False"
     - name: recipients
-      value: "['francisco.donoso@sma.gob.cl','cristobal.lagos@sma.gob.cl','javiera.poblete@sma.gob.cl','javier.lopatin@uai.cl','m.galleguillos@uai.cl','jonathan.hodge@uai.cl']"
-      # value: "['jonathan.hodge@uai.cl']"
+      # value: "['francisco.donoso@sma.gob.cl','cristobal.lagos@sma.gob.cl','javiera.poblete@sma.gob.cl','javier.lopatin@uai.cl','m.galleguillos@uai.cl','jonathan.hodge@uai.cl']"
+      value: "['jonathan.hodge@uai.cl']"
     - name: dask_image # data-pipeline image to use for Pods
       value: "262301216538.dkr.ecr.us-west-2.amazonaws.com/easi-dask-noml:2023.10.2"
     # IMAGES AND SECRETS
@@ -335,6 +337,7 @@ spec:
           artifacts:
             - name: changes
               from: "{{steps.assembler.outputs.artifacts.changes}}"
+        when: "{{workflow.parameters.send_email}} == True"
 
 ##--------------------------------
   - name: tile-generator
@@ -374,11 +377,11 @@ spec:
       - name: product_cells
         path: /tmp/product_cells.pickle
 
-    tolerations:
-      - key: easi.csiro.au/dedicated
-        operator: Equal
-        effect: NoSchedule
-        value: data_pipelines
+    # tolerations:
+    #   - key: easi.csiro.au/dedicated
+    #     operator: Equal
+    #     effect: NoSchedule
+    #     value: data_pipelines
 
     # activeDeadlineSeconds: 300
     retryStrategy:
@@ -518,13 +521,13 @@ spec:
       artifacts:
       - name: product_cells
         path: /tmp/product_cells.pickle
-    nodeSelector:
-      easi.csiro.au/node-purpose: 8vCPU_16Gib # Using big nodes to avoid disruption - other compute optimised nodes have high disruption rates
-    tolerations:
-      - key: easi.csiro.au/dedicated
-        operator: Equal
-        effect: NoSchedule
-        value: data_pipelines
+    # nodeSelector:
+    #   easi.csiro.au/node-purpose: 8vCPU_16Gib # Using big nodes to avoid disruption - other compute optimised nodes have high disruption rates
+    # tolerations:
+    #   - key: easi.csiro.au/dedicated
+    #     operator: Equal
+    #     effect: NoSchedule
+    #     value: data_pipelines
     # activeDeadlineSeconds: 3540 # Runtime shouldn't exceed 60 minutes - this is here to allow for Dask scheduler lockups or other issues
     retryStrategy:
       limit: "3"
@@ -633,11 +636,11 @@ spec:
       - name: changes
         path: /tmp/changes
 
-    tolerations:
-      - key: easi.csiro.au/dedicated
-        operator: Equal
-        effect: NoSchedule
-        value: data_pipelines
+    # tolerations:
+    #   - key: easi.csiro.au/dedicated
+    #     operator: Equal
+    #     effect: NoSchedule
+    #     value: data_pipelines
 
     retryStrategy:
       limit: "3"
@@ -767,11 +770,11 @@ spec:
       - name: dates
         path: /tmp/dates
 
-    tolerations:
-      - key: easi.csiro.au/dedicated
-        operator: Equal
-        effect: NoSchedule
-        value: data_pipelines
+    # tolerations:
+    #   - key: easi.csiro.au/dedicated
+    #     operator: Equal
+    #     effect: NoSchedule
+    #     value: data_pipelines
 
     retryStrategy:
       limit: "3"
@@ -882,11 +885,11 @@ spec:
       - name: package-path          # Top level dir in which sidecar package will be downloaded to, e.g. {{package-path}}/easi-workflows
       - name: package-secret        # Git-credentials format, e.g. git-credentials: $(echo -n "https://username:password@dev.azure.com | base64)
 
-    tolerations:
-      - key: easi.csiro.au/dedicated
-        operator: Equal
-        effect: NoSchedule
-        value: data_pipelines
+    # tolerations:
+    #   - key: easi.csiro.au/dedicated
+    #     operator: Equal
+    #     effect: NoSchedule
+    #     value: data_pipelines
 
     retryStrategy:
       limit: "3"
@@ -1018,11 +1021,11 @@ spec:
       - name: changes
         path: /tmp/changes
 
-    tolerations:
-      - key: easi.csiro.au/dedicated
-        operator: Equal
-        effect: NoSchedule
-        value: data_pipelines
+    # tolerations:
+    #   - key: easi.csiro.au/dedicated
+    #     operator: Equal
+    #     effect: NoSchedule
+    #     value: data_pipelines
         
     volumes:
       - name: git-sync
