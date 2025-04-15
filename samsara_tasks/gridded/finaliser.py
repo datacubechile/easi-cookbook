@@ -338,6 +338,15 @@ class Assemble(ArgoTask):
                     bucket=bucket,
                     key=key,
                 )
+                sam_changed_df_path = path / "sam_changed_df.csv"
+                sam_changed_df.to_csv(sam_changed_df_path)
+                sam_changed_df_key = str(Path(self.output['prefix']) / 'final' / date_key_str / sam_changed_df_path.relative_to(self.temp_dir.name))
+                self._logger.info(f"    Uploading {sam_changed_df_path} to s3://{bucket}/{sam_changed_df_key}")
+                self.s3_upload_file(
+                    path=str(sam_changed_df_path),
+                    bucket=bucket,
+                    key=sam_changed_df_key,
+                )
             self._logger.info("Completed upload of assembled data")
 
         with open('/tmp/dates_idx', 'w') as outfile:
